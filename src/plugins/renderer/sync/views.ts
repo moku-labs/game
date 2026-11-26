@@ -1258,8 +1258,8 @@ const SIZE = { x: 0, y: 0 };
 /**
  * Draws the place and the size of a HUD return's walk (F245) the view's `hud*` numbers hold onto the part's top: the
  * position and the scale, by the sums `applyTransform` writes there (the pivot and a wrapper's visual are not the
- * walk's), compared with what Pixi holds, marked as a move when one differs, and copied from `PLACE` and `SIZE`. The
- * rotation is `applyHudTurn`'s.
+ * walk's), compared with what Pixi holds, marked as a move when one differs or the walk turned the part, and copied
+ * from `PLACE` and `SIZE`. For a turned part it notes the rotation `applyHudTurn` writes, in `hudTurn`.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity of the part.
@@ -1283,32 +1283,34 @@ export function applyHudTop(sctx: SyncCtx, entity: Entity, view: View): void {
 
   const isSame =
     position.x === PLACE.x && position.y === PLACE.y && scale.x === SIZE.x && scale.y === SIZE.y;
+  const isTurned = view.hudTurned;
 
+  if (isSame && !isTurned) return;
+
+  // A turn is marked and summed here: inlined into `turnPart`, this read and mark spent V8's inlining budget, and
+  // Pixi's rotation setter was called with its fraction boxed (measured, 48 B a frame of three parts in some runs).
+  markMoved(sctx, entity);
+  if (isTurned) view.hudTurn = value.rotation + view.hudRotation;
   if (isSame) return;
 
-  markMoved(sctx, entity);
   position.copyFrom(PLACE);
   scale.copyFrom(SIZE);
 }
 
 /**
- * Turns a HUD part's top by the rotation of its `Transform` plus its walk's (F245), the sum `applyTransform` writes
- * there, when the walk turned it (`hudTurned`), marked as a move. Pixi's rotation is not read: V8 inlines neither its
- * getter nor its setter into a larger function here and boxes the fraction each takes or gives (measured, 16 B each a
- * part and frame of a turning walk); the step of the HUD parts calls this one in a walk of its own.
+ * Turns a HUD part's top to the rotation `applyHudTop` noted in `hudTurn` (its `Transform`'s plus its walk's, F245),
+ * when the walk turned it (`hudTurned`); `applyHudTop` marked the move. Pixi's rotation is not read: V8 inlines neither
+ * its getter nor its setter into a larger function here and boxes the fraction each takes or gives (measured, 16 B
+ * each a part and frame of a turning walk); the step of the HUD parts calls this one in a walk of its own, after the
+ * walk of `applyHudTop`, and it reads no component and marks nothing, so the setter is all V8 has to inline.
  *
- * @param sctx - Domain context of the sync module.
- * @param entity - The entity of the part.
- * @param view - Its view.
+ * @param view - The view of the part.
  */
-export function applyHudTurn(sctx: SyncCtx, entity: Entity, view: View): void {
+export function applyHudTurn(view: View): void {
   if (!view.hudTurned) return;
 
-  const value = sctx.ctx.deps.world.ecs.get(entity, Transform) ?? Transform.defaults;
-
   view.hudTurned = false;
-  markMoved(sctx, entity);
-  (view.wrapper ?? view.object).rotation = value.rotation + view.hudRotation;
+  (view.wrapper ?? view.object).rotation = view.hudTurn;
 }
 
 /**
@@ -1639,6 +1641,7 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
     hudScaleY: 1,
     hudWalking: false,
     hudTurned: false,
+    hudTurn: 0,
     held: false
   };
 

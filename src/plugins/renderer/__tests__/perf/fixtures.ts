@@ -6,6 +6,7 @@
 import * as pixi from "pixi.js";
 import { vi } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
+import type { EdgeTimingState } from "../../../flow/runner/types";
 import type { FrameMeasure } from "../../../time/types";
 import { Exiting, Layer, Order } from "../../../world/ecs/define";
 import { projection } from "../../../world/projection/define";
@@ -35,6 +36,7 @@ import { endReturnOf, startReturn, stepReturns } from "../../sync/overlay-return
 import type { SyncCtx } from "../../sync/types";
 import type { PixiFilter } from "../../types";
 import { box, demandAlone } from "../demand-harness";
+import { edgeRing, pushEdge } from "../edge-harness";
 import { FakeFilter, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 import { startOverlayStage } from "../overlay-harness";
@@ -154,6 +156,47 @@ export function monitorFrame(agent: AgentRenderer, record: FrameMeasure): void {
   mock.modules.monitor.end(true);
   commitFrame(pc, record);
   record.frame += 1;
+}
+
+/** The two edges of a merge drag on the board of A Memory Missing, their times made once. */
+const DROP = { at: 400, ms: 0.42, commitMs: 0.18, hooksMs: 0.2, wallMs: 3120.5 };
+const MERGED = { at: 401, ms: 2.5, commitMs: 1, hooksMs: 1.25, bodyMs: 0.75, wallMs: 0.5 };
+
+/** The flow's ring of timed edges each agent of `startEdgeAgent` reads. */
+const EDGE_RINGS = new WeakMap<AgentRenderer, EdgeTimingState>();
+
+/**
+ * Starts the agent build of `startPlainAgent` whose fake `flow.edgeTimes()` answers a ring of timed edges, empty.
+ *
+ * @param clock - `"plain"` for an alloc window, `"real"` for a bench.
+ * @returns The started agent build.
+ */
+export async function startEdgeAgent(clock: "plain" | "real" = "plain"): Promise<AgentRenderer> {
+  const agent = await startPlainAgent(clock);
+  const ring = edgeRing();
+
+  agent.mock.setEdgeTimes(ring);
+  EDGE_RINGS.set(agent, ring);
+
+  return agent;
+}
+
+/**
+ * One frame of `monitorFrame` after two flow edges, written into the ring the way the flow's runner writes them: the
+ * drop and the merge of a drag, the same two node paths every time.
+ *
+ * @param agent - An agent build of `startEdgeAgent`.
+ * @param record - The frame record.
+ */
+export function edgeFrame(agent: AgentRenderer, record: FrameMeasure): void {
+  const ring = EDGE_RINGS.get(agent);
+
+  if (ring !== undefined) {
+    pushEdge(ring, "mergeBoard/awaitIntent", "drop", "mergeBoard/drop", DROP);
+    pushEdge(ring, "mergeBoard/drop", "merged", "mergeBoard/awaitIntent", MERGED);
+  }
+
+  monitorFrame(agent, record);
 }
 
 /** A started renderer with `count` sprite views in one layer, every change set cleared. */

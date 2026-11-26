@@ -97,6 +97,7 @@ describe("renderer state", () => {
       hudScaleY: 1,
       hudWalking: false,
       hudTurned: false,
+      hudTurn: 0,
       held: false
     });
 

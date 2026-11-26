@@ -1186,6 +1186,37 @@ describe("F245: the walk on the stage", () => {
     expect(topY(stage, energy)).toBe(132);
   });
 
+  // Bug: a walk that only turns a part leaves its kept picture unmarked (the top turns, the picture stays), or the top
+  // is turned to the walk's rotation without its Transform's.
+  it("turns a part's top to its Transform's rotation plus the walk's, marked as a move, its place unchanged", async () => {
+    const { stage, energy } = await returnStage();
+    const { ecs } = stage.drawn.mock.world;
+    const { demand, sync } = stage.drawn.mock.modules;
+    const turning = {
+      delayMs: 0,
+      fadeMs: 1000,
+      keyframes: [{ at: 0, Transform: { rotation: 0.5 } }]
+    };
+    const splash = shown(stage, { hud: "none", hudReturn: turning });
+
+    ecs.set(energy, Transform, { y: 100, rotation: 0.25 });
+    leaveAndGo(stage, splash);
+    step(stage, 300);
+
+    const before = demand.moved().has(energy);
+
+    // The overlay step of the next frame alone, 200 ms on: the marks it makes are read before a decision clears them.
+    stage.drawn.mock.ctx.state.sync.frameDelta = 200;
+    sync.stepOverlays();
+
+    const walked = stage.drawn.mock.ctx.state.sync.views.get(energy)?.hudRotation ?? Number.NaN;
+
+    expect(walked > 0 && walked < 0.5).toBe(true);
+    expect(stage.topOf(energy).rotation).toBe(0.25 + walked);
+    expect(topY(stage, energy)).toBe(100);
+    expect([before, demand.moved().has(energy)]).toEqual([false, true]);
+  });
+
   // Bug: the last run's pose wins over the others, or the scale is added instead of multiplied with the part's own.
   it("adds the offsets of two runs that hold a part, and multiplies a scale with the part's own", async () => {
     const { stage, energy } = await returnStage();

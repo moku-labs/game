@@ -14,6 +14,12 @@ export const BUDGET = {
   monitorCommitSteady: 0,
   // R5: before 16 B. A late frame's annotation and its pending slot allocate nothing.
   monitorCommitLate: 0,
+  // hp-8: the flow times edges and none came since the previous commit: one read of `flow.edgeTimes()`, one compare.
+  // New.
+  monitorCommitNoEdges: 0,
+  // hp-8: two flow edges before the frame: their ms summed, the costliest node's path read from the intern map, the
+  // second's sums and each edge's frame stored into typed arrays. The two writes into the flow's ring are in it. New.
+  monitorCommitEdges: 0,
   // N1/N2: every section on and timed, one clock read a lap (a browser's clock may box its own answer). Before: the
   // steady line, 17 B. Now 0, the window's close as `monitorCommitSteady`.
   monitorSectionsOn: 0,

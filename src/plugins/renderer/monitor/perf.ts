@@ -18,14 +18,11 @@ import type { MonitorSections, PerfChange } from "./log-types";
 import { observeLongFrames } from "./long-frames";
 import { attachGlPasses, createPassSink } from "./passes";
 import { resetProblems } from "./problems";
-import { CHANGED, createFrameRing } from "./ring";
+import { CHANGED, createFrameRing, internPath } from "./ring";
 import { bitsOf, listsOf, switched } from "./sections";
 import { deliver, flushPerf, writeEvent } from "./stream";
 import { resetTicks } from "./ticks";
 import { MEASURE, type MonitorSinks, type PerfCtx, type PerfState } from "./types";
-
-/** Flow paths the ring interns; the rest share the overflow path of id 0. */
-const PATH_SLOTS = 1024;
 
 /**
  * Notes the flow path of the frames from now on, interned once; a rest on a path other than the last rest path writes
@@ -37,16 +34,8 @@ const PATH_SLOTS = 1024;
  */
 export function notePath(pc: PerfCtx, path: string, rest: boolean): void {
   const { perf } = pc;
-  const { paths } = perf.ring;
-  let id = perf.pathIds.get(path);
 
-  if (id === undefined && paths.length < PATH_SLOTS) {
-    id = paths.length;
-    paths.push(path);
-    perf.pathIds.set(path, id);
-  }
-
-  perf.pathId = id ?? 0;
+  perf.pathId = internPath(perf, path);
 
   if (!rest || path === perf.restPath) return;
 
@@ -305,6 +294,8 @@ export function stopPerf(perf: PerfState, sinks: MonitorSinks): void {
   perf.ring.paths.length = 1;
   perf.pathId = 0;
   perf.restPath = undefined;
+  // The second's costliest edge names a path id the cleared table no longer holds.
+  perf.edgeSec.fill(0);
   perf.ring.size = 0;
   perf.ring.newest = -1;
   perf.ring.passes.size = 0;

@@ -208,6 +208,11 @@ export type View = {
    */
   hudTurned: boolean;
   /**
+   * The rotation the step of the HUD parts turns this view's top to (F245), its `Transform`'s plus `hudRotation`: noted
+   * by the walk that places the parts while `hudTurned`, written by the walk that turns them.
+   */
+  hudTurn: number;
+  /**
    * A held top of a scene build (spec 31) or of a warm window (spec 33, slice B+D): a view of the next scene, or of a
    * closed window, with no parent or with a live parent, built while the current scene stays drawn. It hangs nowhere
    * in the stage, is listed in `SyncState.heldViews`, and is attached in the pass after the commit or the open.

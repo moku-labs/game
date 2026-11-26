@@ -5,16 +5,19 @@
  * before a listener gets it, built at a flush or when something happens, never per frame. Numbers are rounded here:
  * ms and MB to 2 decimals, counts whole.
  */
+import type { EdgeTiming } from "../../flow/types";
 import type { Json } from "../../model/types";
 import { nativeShell, readingOf } from "../../time/native";
 import type { ThermalReading } from "../../time/types";
 import { epochOf, pageNow } from "./clock";
 import { compilesOf } from "./compiles";
 import { readCounts } from "./counts";
+import { edgeOf, edgesOfFrame, edgesOfSecond } from "./edges";
 import {
   type FrameRecord,
   PERF_LOG_VERSION,
   type PerfDisplay,
+  type PerfEdgeLine,
   type PerfEventLine,
   type PerfEventName,
   type PerfHeaderLine,
@@ -761,8 +764,8 @@ function sectionsMsOf(perf: PerfState): NonNullable<PerfSampleLine["sectionsMs"]
 
 /**
  * The sample of one window: counts, gaps, work, phases, systems, the GPU, passes, draws, filters, uploads, compiles,
- * long frames, heap, textures and what measuring cost, each section's part of it too. The parts of a section that is
- * off at the flush are `null`, as on a build that does not measure them.
+ * long frames, heap, textures, what measuring cost, each section's part of it too, and the flow edges of the second.
+ * The parts of a section that is off at the flush are `null`, as on a build that does not measure them.
  *
  * @param pc - The perf context.
  * @param start - The window's start, page clock.
@@ -870,13 +873,14 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
       (bits & MEASURE.targets) === 0
         ? null
         : { created: totals.targetsCreated, destroyed: totals.targetsDestroyed },
-    sectionsMs: sectionsMsOf(perf)
+    sectionsMs: sectionsMsOf(perf),
+    edges: edgesOfSecond(pc)
   };
 }
 
 /**
  * A spike with everything known about it: its record, its slowest systems, its compiles, its filters per kind, its
- * passes with their GPU time, and the long frames around it.
+ * passes with their GPU time, the flow edges counted in it, and the long frames around it.
  *
  * @param pc - The perf context.
  * @param slot - The ring slot of the frame.
@@ -902,9 +906,32 @@ export function spikeLine(pc: PerfCtx, slot: number): PerfSpikeLine {
     passes: passesOf(ring, record.frame, cellF32(ring.columns.draws, slot), entity =>
       viewLabel(pc, entity)
     ),
+    edges: edgesOfFrame(pc, record.frame),
     longFrames: longFramesIn(longFrames, start, record.t + record.workMs).map(entry =>
       entryOf(entry)
     )
+  };
+}
+
+/**
+ * One flow edge as its own line, built at the flush: `t` the page epoch ms of its start.
+ *
+ * @param perf - The perf state.
+ * @param timing - The flow's ring of `flow.edgeTimes()`.
+ * @param index - The edge's index, counted since the app started; the ring still holds it.
+ * @returns A fresh edge line.
+ */
+export function edgeLine(
+  perf: PerfState,
+  timing: Readonly<EdgeTiming>,
+  index: number
+): PerfEdgeLine {
+  return {
+    v: PERF_LOG_VERSION,
+    kind: "edge",
+    t: epochOf(cellF64(timing.at, index % timing.capacity)),
+    build: buildId(),
+    ...edgeOf(perf, timing, index)
   };
 }
 

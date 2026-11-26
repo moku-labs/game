@@ -548,7 +548,7 @@ function turnPart(entity: Entity): void {
 
   const view = sctx.ctx.state.sync.views.get(entity);
 
-  if (view !== undefined) applyHudTurn(sctx, entity, view);
+  if (view !== undefined) applyHudTurn(view);
 }
 
 /**

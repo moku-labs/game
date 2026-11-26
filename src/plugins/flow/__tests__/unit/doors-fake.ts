@@ -175,6 +175,7 @@ export function createDoorsFake(): DoorsFake {
       state: (): FlowState => live.state,
       history: (): readonly JournalEntry[] => [...live.journal],
       setMode: vi.fn(),
+      edgeTimes: () => undefined,
       gate: {
         answer: (answer): boolean => {
           answers.push(answer);
