@@ -128,7 +128,7 @@ try {
 
         clocks[scene]?.push(clock.trim());
 
-        if (Date.now() - awake.at < 120_000) return;
+        if (Date.now() - awake.at < 60_000) return;
 
         awake.at = Date.now();
         await adb("shell", "input", "keyevent", "KEYCODE_WAKEUP");
