@@ -416,6 +416,18 @@ of the same feature shows. It runs after the reconcile of
 memory leaves when the state moves on) still holds the bundle (F51b); a scene that leaves with no
 exit lets it go in the frame after the switch. A fast walk marks nothing; a transit node marks
 nothing. A running load is never aborted by the release.
+
+**A drawn `"leave"` bundle waits (F246).** Before either release unloads a bundle it asks
+`renderer.sync.textures.used(keys)`, as the budget does (F184): a bundle a sprite or nine-slice view
+draws now stays, so a picture still in flight after its scene stopped naming the bundle (a reward
+that flies to a button) never turns into the magenta placeholder. A dev build warns
+`assets: a "leave" bundle is drawn when it would be released; it goes once nothing draws it`
+`{ bundle }`. The one a leaving scene dropped is kept on a list that `assets.leave` asks again in
+every `sync`: it goes at the first `sync` no view draws it, or leaves the list when something holds
+it again (a scene names it) or it went another way. The list is empty in normal play and costs one
+length read; a frame with a bundle on it walks its keys and allocates nothing. One the rest found
+drawn is asked again at the next rest. The four consumers outside the view table (particles,
+filter inputs, inline images in text, the leave loader) do not count, as for the budget.
 The preload fetches a `"leave"` bundle only while it is held, so entering its feature from outside
 waits for its load. `"leave"` adds a way out, never a protection: the budget may still evict the
 bundle, and `app.assets.unload` works as for any other.

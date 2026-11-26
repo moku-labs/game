@@ -11,7 +11,7 @@ import { pickVictim, releaseSceneLeft } from "../../budget";
 import { neighbourhood } from "../../preload";
 import { passReadyNode, stepReady } from "../../ready";
 import { loadBundle } from "../../tiers";
-import { createMockAssets, graphOf, manifestOf, sceneOf } from "../unit/mock-assets";
+import { createMockAssets, graphOf, leaving, manifestOf, sceneOf } from "../unit/mock-assets";
 
 /** Calls before a window: the check reaches its optimized tier first. */
 const WARM_CALLS = 30_000;
@@ -83,6 +83,34 @@ export function exitEndStillExiting(): () => void {
 
   mock.ctx.state.sceneLeaving = ["board.chains"];
   mock.ctx.state.exiting = 2;
+
+  return () => releaseSceneLeft(mock.assetsCtx);
+}
+
+/**
+ * The sync of a frame while a dropped `"leave"` bundle is still drawn by a view (a reward picture in flight, F246):
+ * the retry asks `used` again and keeps it.
+ *
+ * @returns The call the world makes.
+ */
+export async function leftStillDrawn(): Promise<() => void> {
+  const mock = createMockAssets({
+    manifest: leaving(
+      manifestOf({ board: { feature: "board", tier: "scene", keys: ["board.cell", "board.bg"] } }),
+      "board"
+    )
+  });
+
+  await mock.start();
+  await loadBundle(mock.assetsCtx, "board", undefined, "request");
+  mock.renderer.drawn.add("board.bg");
+  mock.ctx.state.sceneLeaving = ["board"];
+  releaseSceneLeft(mock.assetsCtx);
+
+  // The fixture must measure the path it names.
+  if (mock.ctx.state.leftDrawn.length !== 1 || !mock.api.isLoaded("board")) {
+    throw new Error("leftStillDrawn: the bundle is not kept for a retry");
+  }
 
   return () => releaseSceneLeft(mock.assetsCtx);
 }
