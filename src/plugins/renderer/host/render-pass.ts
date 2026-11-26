@@ -44,6 +44,14 @@
  */
 import { RESTART } from "../reasons";
 import type { PixiModule } from "../types";
+import {
+  emptyTable,
+  type FrontTable,
+  keepPipeline,
+  NO_KEY,
+  readPipeline,
+  restKey
+} from "./pipeline-keys";
 import type { CanvasPassListener } from "./types";
 
 /** Pixi's WebGPU render target system class, the base of the renderer's. */
@@ -678,6 +686,12 @@ export function createLazyCanvasClasses(
     private readonly host: GpuRenderer;
     /** The lazy adaptor of the renderer, once found. */
     private lazy: LazyCanvasAdaptor | undefined = undefined;
+    /** The front tables, one per Pixi pipe cache: Pixi swaps that map whenever the pass's global state changes. */
+    private readonly fronts = new WeakMap<object, FrontTable>();
+    /** The Pixi pipe cache `front` belongs to. */
+    private frontOf: object | undefined = undefined;
+    /** The front table of the current pipe cache. */
+    private front: FrontTable = emptyTable();
 
     /**
      * Keeps the renderer it is made for.
@@ -714,7 +728,53 @@ export function createLazyCanvasClasses(
         if (lazy.pending) lazy.beginPending();
       }
 
-      return super.getPipeline(geometry, program, state, topology, overrides);
+      // Per draw: three small-integer lookups in front of Pixi's boxed key; Pixi is asked once per pipeline.
+      const geometryKey = geometry._layoutKey;
+      const rest = restKey(
+        state.data,
+        state._blendModeId,
+        topology ?? geometry.topology,
+        overrides?.id
+      );
+
+      if (!geometryKey || rest === NO_KEY) {
+        return super.getPipeline(geometry, program, state, topology, overrides);
+      }
+
+      const table = this.table();
+      const kept = readPipeline(table, program._layoutKey, geometryKey, rest);
+
+      if (kept !== undefined) return kept;
+
+      const made = super.getPipeline(geometry, program, state, topology, overrides);
+
+      keepPipeline(table, program._layoutKey, geometryKey, rest, made);
+
+      return made;
+    }
+
+    /**
+     * The front table of Pixi's current pipe cache: the one kept, or another when the global state swapped the cache.
+     *
+     * @returns The table.
+     */
+    private table(): FrontTable {
+      // `_pipeCache` is private in Pixi's types; it is the map `getPipeline` reads, swapped by `_updatePipeHash`.
+      const cache = (this as unknown as { _pipeCache: object })._pipeCache;
+
+      if (cache === this.frontOf) return this.front;
+
+      let table = this.fronts.get(cache);
+
+      if (table === undefined) {
+        table = emptyTable();
+        this.fronts.set(cache, table);
+      }
+
+      this.frontOf = cache;
+      this.front = table;
+
+      return table;
     }
 
     /**
