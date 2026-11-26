@@ -12,6 +12,8 @@ export const BUDGET = {
   nothingLeaves: 0,
   // A scene leaves and an element still plays its exit: one count read.
   stillExiting: 0,
+  // F246: a dropped leave bundle a view still draws, asked again in every sync: `used` over its keys. New.
+  leftStillDrawn: 0,
   // A view asks for a key of a loaded bundle (F184, change 2026-11-15-f184-budget-drawn): a touch and two map reads.
   lookupHit: 0,
   // The look-ahead of one rest, a hub with six windows and the same committed state. Before F194 95 312 B: every

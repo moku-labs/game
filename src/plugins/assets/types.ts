@@ -646,6 +646,12 @@ export type State = {
    */
   reloadHeld: Set<string>;
   /**
+   * Bundles a leaving scene dropped whose release found them drawn by a view (a reward picture still in flight): the
+   * system `assets.leave` asks again in every `sync` and lets each go once nothing draws it, or forgets it once
+   * something holds it again. Empty, it costs one length read; removed by a swap with the last, nothing is built (F246).
+   */
+  leftDrawn: string[];
+  /**
    * Bundles a node rests on through the `ready` effect, to the live rests seen since: a `ready` answered `false` for
    * them, and none answered `true` since. Held from the budget and from the `"leave"` release, so the rest the node
    * waits on cannot take them before the node asks again (F190). A bundle no `ready` asked for again by its second

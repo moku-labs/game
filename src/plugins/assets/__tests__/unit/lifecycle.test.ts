@@ -278,8 +278,11 @@ describe("releaseAll", () => {
     const created = mock.io.created.length;
 
     mock.ctx.state.restedLive = true;
+    // A bundle waiting for its views (F246): a restarted app must not retry a name of the session before.
+    mock.ctx.state.leftDrawn.push("board");
     releaseAll(mock.ctx.state);
 
+    expect(mock.ctx.state.leftDrawn).toEqual([]);
     expect(mock.io.destroyed).toHaveLength(created);
     expect(mock.ctx.state.records.size).toBe(0);
     expect(mock.ctx.state.removers).toEqual([]);

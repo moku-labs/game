@@ -347,6 +347,7 @@ export function releaseAll(state: State): void {
   state.keysOf.clear();
   state.budgetUnloaded.clear();
   state.reloadHeld.clear();
+  state.leftDrawn.length = 0;
   state.readyWaiting.clear();
   state.thrashWarned.clear();
   state.scenes.clear();

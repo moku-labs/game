@@ -51,6 +51,7 @@ export function createAssetsState(): State {
     keysOf: emptyMap(),
     budgetUnloaded: emptySet(),
     reloadHeld: emptySet(),
+    leftDrawn: [],
     readyWaiting: emptyMap(),
     readyAsk: 0,
     readyPlace: "gone",
