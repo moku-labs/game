@@ -417,7 +417,8 @@ function posesSystem(actx: AnimCtx): AnySystem {
 /**
  * Opens what the plugin owns: the animations of every feature, the `play` of the `AnimPlayer`
  * resource, the tween driver of `world`, the handler of the `play` effect, the two world hooks
- * that keep the `Frames` loops and the system that samples the tracks born since the step (F241).
+ * that keep the `Frames` loops and the two world systems that write the first samples: `anim.pose`
+ * first in phase `sync`, `anim.sample` in its tail (F241).
  *
  * @param ctx - Kernel context of the anim plugin.
  */
@@ -428,12 +429,17 @@ export function startAnim(ctx: KernelSlice): void {
   registerAnimations(actx);
   openPlayer(actx, rt);
   actx.state.removeDriver = actx.deps.world.projection.setDriver(createDriver(actx));
+
+  // The play effect and the frame loops.
   actx.state.offPlay = actx.deps.flow.fx.handle("play", createPlayHandler(actx, rt), {
     runInFast: false
   });
   openFrameLoops(actx);
+
+  // The first samples: the pose sampler first in phase sync, the sampler in its tail (F241).
   actx.state.offSample = actx.deps.world.ecs.system(sampleSystem(actx));
   actx.state.offPose = actx.deps.world.ecs.system(posesSystem(actx));
+
   const renderer = ctx.require(rendererPlugin);
 
   // `sync.loopsHeld`: whether an endless loop of a view the player cannot see writes nothing.
