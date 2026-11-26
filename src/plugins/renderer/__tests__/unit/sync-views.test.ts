@@ -224,7 +224,9 @@ describe("sync views", () => {
     }
     expect(views.get(grandchild)?.object.parent).toBe(nested?.wrapper);
     expect(views.get(cousin)?.object.parent).toBe(views.get(other)?.wrapper);
-    expect(extra.parent).toBe(host);
+    // The detach passes it over; the wrapper then goes to its pool empty (2в), as Pixi's destroy emptied it before.
+    expect(extra.destroyed).toBe(false);
+    expect(host?.children).toEqual([]);
     expect(mock.log.warn).toHaveBeenCalledWith("renderer: parent left before its children", {
       parent,
       orphans: children

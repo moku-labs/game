@@ -41,7 +41,7 @@
  * | renderer | poolTrim | { restMs: 1000, aboveMb: 16 }, the idle render targets of Pixi's pool go after a second at rest, a second after a scene change and on a pause; false keeps them; shallow merge: a game that sets `poolTrim` gives both fields |
  * | renderer | preference | "webgpu", WebGL is Pixi's fallback |
  * | renderer | aspect | { min: 4/3, max: 21/9 }; shallow merge: a game that sets `aspect` gives both fields |
- * | renderer | poolLimit | 256 |
+ * | renderer | poolLimit | 1024, the display objects and the wrappers of parent views kept in all pools together |
  * | renderer | adaptiveScale | { floor: 0.75, devices: "phone" }, the render scale of the adaptive frame rate on a GPU-bound phone; false keeps the resolution; shallow merge: a game that sets it gives both fields |
  * | renderer | unsupportedMessage | "This device cannot run the game." |
  * | renderer | loadPixi | () => import("pixi.js") |

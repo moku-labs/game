@@ -33,6 +33,7 @@ import { dropQuadParts } from "./shade";
 import {
   dropSourceTextures,
   holdsSource,
+  leaveSourceTop,
   markAllSources,
   markSources,
   resolveReaders,
@@ -336,6 +337,8 @@ export function createKeptApi(
       const record = state.byEntity.get(entity);
 
       if (record !== undefined) dropRecord(kctx, record, viewOf(record), false);
+      // Its Source lets the top go too: the wrapper is pooled and may come back as this entity's next top (2в).
+      leaveSourceTop(kctx, entity);
     },
 
     collect: (): void => {

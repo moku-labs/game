@@ -358,7 +358,10 @@ export type Config = {
   preference: "webgpu" | "webgl";
   /** Allowed long side / short side of the frame. A window outside it gets bars. */
   aspect: AspectRange;
-  /** Display objects kept in all pools together. */
+  /**
+   * Display objects kept in all pools together, the wrappers of parent views among them: what a dropped view gives
+   * back and the next view takes, instead of a destroy and a new object. Past it, the oldest is destroyed.
+   */
   poolLimit: number;
   /** Text of the unsupported-device screen. */
   unsupportedMessage: string;
