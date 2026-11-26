@@ -2,7 +2,6 @@
  * @file Stress plugin — its types: the kinds of a frame of the walk, the driver's state and what the page reads.
  */
 import type { Session } from "../../state";
-import type { CullState } from "./cull";
 
 /** What a frame of the walk did; the code a row carries. */
 export const KIND = {
@@ -38,8 +37,6 @@ export type StressState = {
   probe: unknown;
   /** Every line the monitor's stream wrote since the last read, as JSON text. */
   log: string[];
-  /** The culling experiments of the page. */
-  cull: CullState;
 };
 
 /** What the page reads: `game.stress`. */
@@ -89,7 +86,7 @@ export type StressApi = {
    * game.stress.info().entities; // 812
    * ```
    */
-  info(): { session: Session; stats: unknown; entities: number; pixiNodes: number; flips: number };
+  info(): { session: Session; stats: unknown; entities: number };
   /**
    * An estimate of the pixels the frame on screen fills: every visible leaf of the Pixi stage by its bounding box,
    * cut to the canvas, at the canvas resolution. A box is more than the pixels a shape covers, a clip mask is not

@@ -13,7 +13,6 @@ import {
 } from "../../../../src/index.ts";
 import { PITCH } from "../../features/stress/views";
 import type { Session } from "../../state";
-import type { CullState } from "./cull";
 import { KIND, type StressState } from "./types";
 
 /** What the walk drives. */
@@ -97,33 +96,18 @@ function boardFrame(state: StressState, driven: Driven, at: number, mergeAt: num
  * the new page from 40 % off to its place, then rest.
  *
  * @param driven - What the walk drives.
- * @param cull - The culling experiments' state: the walk writes the pages and the strip's x it leaves.
- * @param sets - The sets of the album.
  * @param at - The frame of the walk.
  * @param third - A third of the walk: the drag, the slide and the rest take one each.
  * @returns The kind of the frame.
  */
-function albumFrame(
-  driven: Driven,
-  cull: CullState,
-  sets: number,
-  at: number,
-  third: number
-): number {
+function albumFrame(driven: Driven, at: number, third: number): number {
   const { ecs } = driven.world;
   const strip = driven.ui.find("pages");
   let kind: number = KIND.rest;
 
-  if (at === 0 && driven.flow.gate.answer({ intent: "peek" })) {
-    kind = KIND.peek;
-    cull.beside = (cull.on + 1) % sets;
-    cull.side = 1;
-  } else if (at === third && driven.flow.gate.answer({ intent: "turn" })) {
-    kind = KIND.turn;
-    cull.beside = cull.on;
-    cull.on = (cull.on + 1) % sets;
-    cull.side = -1;
-  } else if (at < third) kind = KIND.drag;
+  if (at === 0 && driven.flow.gate.answer({ intent: "peek" })) kind = KIND.peek;
+  else if (at === third && driven.flow.gate.answer({ intent: "turn" })) kind = KIND.turn;
+  else if (at < third) kind = KIND.drag;
   else if (at < 2 * third) kind = KIND.slide;
 
   if (strip === undefined) return kind;
@@ -133,7 +117,6 @@ function albumFrame(
   if (at < third) x = -PITCH * 0.6 * ((at + 1) / third);
   else if (at < 2 * third) x = PITCH * 0.4 * (1 - (at - third + 1) / third);
 
-  cull.stripX = x;
   if (ecs.get(strip, Transform)?.x !== x) ecs.set(strip, Transform, { x });
 
   return kind;
@@ -198,13 +181,11 @@ export function walkFrame(
   if (scene === "board" || scene === "worst") kind = boardFrame(state, driven, at, third + 2);
 
   if (scene === "scroll" && state.step > 30) {
-    state.cull.offset = Math.abs(((state.step * 24) % 2400) - 1200);
-    driven.ui.scroll("overviewScroll", state.cull.offset);
+    driven.ui.scroll("overviewScroll", Math.abs(((state.step * 24) % 2400) - 1200));
     kind = KIND.scroll;
   }
 
-  if (scene === "album" || scene === "worst")
-    kind = Math.max(kind, albumFrame(driven, state.cull, session.sets, at, third));
+  if (scene === "album" || scene === "worst") kind = Math.max(kind, albumFrame(driven, at, third));
 
   if (scene === "popup" || scene === "worst") {
     kind = Math.max(kind, popupFrame(state, driven, session, at, third));

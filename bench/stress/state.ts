@@ -18,8 +18,6 @@ export type Session = {
   items: number;
   /** Whether the popup panel is frosted glass over a `Source`. */
   glass: boolean;
-  /** The culling experiment of the page, `""` for none: see `plugins/stress/cull.ts`. */
-  cull: string;
   /** Frames of one walk of the driver: 30 is two flips a second at 60 fps, 16 a fast finger. */
   cycle: number;
   /** The set page on show. */
@@ -71,7 +69,6 @@ export function sessionOf(hash: string): Session {
     sets: numberOf(hash, "sets", 15),
     items: numberOf(hash, "items", 63),
     glass: numberOf(hash, "glass", 0) === 1,
-    cull: /(?:^|&)cull=([a-z]+)/.exec(hash)?.[1] ?? "",
     cycle: numberOf(hash, "cycle", 30),
     on: 0,
     beside: -1,

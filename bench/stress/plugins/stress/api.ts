@@ -3,7 +3,6 @@
  */
 import { Display, Layer, type Renderer, Transform, type World } from "../../../../src/index.ts";
 import { startingSession } from "../../state";
-import { type CullNode, createCullState } from "./cull";
 import type { StressApi, StressState } from "./types";
 
 /** The owner of the display object the fill estimate climbs from. */
@@ -29,8 +28,7 @@ export function createStressState(): StressState {
     stale: true,
     running: true,
     probe: undefined,
-    log: [],
-    cull: createCullState()
+    log: []
   };
 }
 
@@ -130,11 +128,11 @@ function addFill(
  * @param world - The world.
  * @returns The stage; `undefined` before Pixi is there and on the call that hangs the probe.
  */
-export function stageOf(
+function stageOf(
   state: StressState,
   renderer: Pick<Renderer.Api, "host">,
   world: Pick<World.Api, "ecs">
-): CullNode | undefined {
+): Leaf | undefined {
   const pixi = renderer.host.pixi();
 
   if (pixi === undefined) return undefined;
@@ -146,7 +144,7 @@ export function stageOf(
     return undefined;
   }
 
-  let stage = state.probe as CullNode;
+  let stage = state.probe as Leaf;
 
   while (stage.parent !== undefined && stage.parent !== null) stage = stage.parent;
 
@@ -200,13 +198,7 @@ export function createStressApi(
     info: () => {
       const entities = [...world.ecs.query(Transform)].length;
 
-      return {
-        session: startingSession,
-        stats: renderer.stats(),
-        entities,
-        pixiNodes: state.cull.marked,
-        flips: state.cull.flips
-      };
+      return { session: startingSession, stats: renderer.stats(), entities };
     },
     fill: () => {
       const canvas = document.querySelector("canvas");
@@ -215,7 +207,7 @@ export function createStressApi(
 
       if (canvas === null || pixi === undefined) return { leaves: 0, mpx: 0, canvasMpx: 0 };
 
-      const stage = stageOf(state, renderer, world) as Leaf | undefined;
+      const stage = stageOf(state, renderer, world);
 
       if (stage === undefined) return { leaves: 0, mpx: 0, canvasMpx: 0 };
 
