@@ -14,6 +14,9 @@ export const PAGE_WIDTH = 348;
 /** The distance between two pages of the strip. */
 export const PITCH = PAGE_WIDTH * 1.25;
 
+/** The height of the overview's scroll: the screen under its head. A scroll that grows shows all its content. */
+const VIEWPORT = 784;
+
 /** What the album sheet is drawn from. */
 type AlbumView = {
   id: string;
@@ -22,6 +25,7 @@ type AlbumView = {
   beside: number;
   side: number;
   page: boolean;
+  windowed: boolean;
 };
 
 /**
@@ -65,14 +69,22 @@ function tile(index: number) {
  *
  * @param sets - The sets of the album.
  * @param covered - Whether a set page stands over it: it stays mounted, at alpha 0.
+ * @param windowed - Whether the scroll is a window of rows: only the rows in view exist (`&cull=window`).
  * @returns The overview.
  */
-function overview(sets: number, covered: boolean) {
-  const rows = Array.from({ length: Math.ceil(sets / 3) }, (_unused, line) => (
-    <row key={`tileRow${line}`} style={{ gap: 10 }}>
+function overview(sets: number, covered: boolean, windowed: boolean) {
+  const rowOf = (line: number) => (
+    <row key={`tileRow${line}`} style={{ gap: 10, height: 175, padding: 9 }}>
       {[0, 1, 2].map(column => tile(line * 3 + column))}
     </row>
-  ));
+  );
+  const rows = windowed
+    ? []
+    : Array.from({ length: Math.ceil(sets / 3) }, (_unused, line) => (
+        <row key={`tileRow${line}`} style={{ gap: 10 }}>
+          {[0, 1, 2].map(column => tile(line * 3 + column))}
+        </row>
+      ));
 
   return (
     <column
@@ -87,11 +99,22 @@ function overview(sets: number, covered: boolean) {
           <text style="s.pill" content="12/135" />
         </stack>
       </row>
-      <scroll key="overviewScroll" style={{ grow: 1, minHeight: 0 }}>
-        <column key="tileRows" style={{ gap: 18, padding: 12 }}>
-          {rows}
-        </column>
-      </scroll>
+      {windowed ? (
+        <scroll
+          key="overviewScroll"
+          rows={Math.ceil(sets / 3)}
+          rowHeight={175}
+          overscan={1}
+          row={rowOf}
+          style={{ height: VIEWPORT }}
+        />
+      ) : (
+        <scroll key="overviewScroll" style={{ height: VIEWPORT }}>
+          <column key="tileRows" style={{ gap: 18, padding: 12 }}>
+            {rows}
+          </column>
+        </scroll>
+      )}
     </column>
   );
 }
@@ -261,7 +284,8 @@ export const albumSheet = projection({
             on: session.on,
             beside: session.beside,
             side: session.side,
-            page: session.scene !== "scroll"
+            page: session.scene !== "scroll",
+            windowed: session.cull === "window"
           }
         ]
       : [],
@@ -272,7 +296,7 @@ export const albumSheet = projection({
       style={{ width: 390, height: 844, fill: 0xf0_e6_ea }}
       components={[Source({ scale: 0.25 })]}
     >
-      {overview(item.sets, item.page)}
+      {overview(item.sets, item.page, item.windowed)}
       {item.page ? setPage(item) : undefined}
     </stack>
   )

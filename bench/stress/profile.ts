@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * @file Reads the profiles a run of the stress bench wrote: `bun bench/stress/profile.ts <file.cpuprofile |
- * file.heapprofile> [top=30] [--under <function> | --callees <function>]`. A CPU profile gives the self time of each function and the time under each of the
+ * file.heapprofile> [top=30] [--under <function> | --callees <function> | --owners <bundle.js>]`. A CPU profile gives the self time of each function and the time under each of the
  * marker functions (the engine's systems and Pixi's render steps), as shares of the sampled time that is not idle.
  * An allocation profile gives the bytes each function allocated, with its nearest named callers.
  */
@@ -56,7 +56,12 @@ const MARKERS = new Set([
 const [file, topArgument, underFlag, underOf] = process.argv.slice(2);
 const top = Number(topArgument ?? 30);
 
-if (underFlag !== undefined && underFlag !== "--under" && underFlag !== "--callees") {
+if (
+  underFlag !== undefined &&
+  underFlag !== "--under" &&
+  underFlag !== "--callees" &&
+  underFlag !== "--owners"
+) {
   console.error(
     "Usage: bun bench/stress/profile.ts <file> [top] [--under <function> | --callees <function>]"
   );
@@ -298,7 +303,118 @@ function readHeap(head: HeapNode): void {
   );
 }
 
+/**
+ * Who owns each line of a bundle: Bun writes a `// <module path>` line before every module it bundles.
+ *
+ * @param bundle - The path of the page's script.
+ * @returns The first line of each module, ascending, and its owner.
+ */
+function ownersOf(bundle: string): { from: number[]; owner: string[] } {
+  const from: number[] = [];
+  const owner: string[] = [];
+
+  for (const [index, line] of readFileSync(bundle, "utf8").split("\n").entries()) {
+    if (!line.startsWith("// ") || line.includes(" ", 3)) continue;
+
+    const module = line.slice(3);
+    const packageName = /node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(module)?.[1];
+
+    from.push(index);
+    owner.push(packageName ?? `game: ${module.split("/").slice(0, 2).join("/")}`);
+  }
+
+  return { from, owner };
+}
+
+/**
+ * The owner of a line of the bundle.
+ *
+ * @param owners - The modules of the bundle.
+ * @param owners.from - The first line of each module.
+ * @param owners.owner - Its owner.
+ * @param line - The line, from 0; -1 for the VM's own code.
+ * @returns The package, `game: <folder>` for the game's own code, `(vm)` for the VM.
+ */
+function ownerOf(owners: { from: number[]; owner: string[] }, line: number): string {
+  if (line < 0) return "(vm and browser)";
+
+  let low = 0;
+  let high = owners.from.length - 1;
+
+  while (low < high) {
+    const middle = (low + high + 1) >> 1;
+
+    if ((owners.from[middle] ?? 0) <= line) low = middle;
+    else high = middle - 1;
+  }
+
+  return owners.owner[low] ?? "(unknown)";
+}
+
+/**
+ * Prints a profile by owner: the self time of a CPU profile, or the bytes of an allocation profile, summed by the
+ * package (or the game folder) each function lives in.
+ *
+ * @param profile - The profile.
+ * @param bundle - The path of the page's script.
+ */
+function readOwners(profile: CpuProfile & { head?: HeapNode }, bundle: string): void {
+  const owners = ownersOf(bundle);
+  const sums = new Map<string, number>();
+  let total = 0;
+
+  if (profile.head === undefined) {
+    const indexed = indexOf(profile);
+
+    for (const [id, ms] of indexed.self) {
+      const frame = indexed.byId.get(id)?.callFrame;
+
+      if (frame === undefined || isIdle(frame.functionName)) continue;
+
+      const name =
+        frame.functionName === "(garbage collector)"
+          ? "(garbage collector)"
+          : ownerOf(owners, frame.lineNumber);
+
+      total += ms;
+      sums.set(name, (sums.get(name) ?? 0) + ms);
+    }
+
+    print("Self time by owner (share of busy time)", sums, total, "ms");
+
+    return;
+  }
+
+  const stack: HeapNode[] = [profile.head];
+
+  while (stack.length > 0) {
+    const node = stack.pop() as HeapNode;
+    const kb = node.selfSize / 1024;
+
+    if (kb > 0) {
+      const name = ownerOf(owners, node.callFrame.lineNumber);
+
+      total += kb;
+      sums.set(name, (sums.get(name) ?? 0) + kb);
+    }
+
+    stack.push(...node.children);
+  }
+
+  print(
+    "Bytes by owner of the allocating function (share of the sampled bytes)",
+    sums,
+    total,
+    "KB"
+  );
+}
+
 const text = JSON.parse(readFileSync(file, "utf8")) as CpuProfile & { head?: HeapNode };
+
+if (underFlag === "--owners" && underOf !== undefined) {
+  readOwners(text, underOf);
+  process.exit(0);
+}
 
 if (text.head === undefined) readCpu(text);
 else readHeap(text.head);

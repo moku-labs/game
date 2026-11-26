@@ -188,6 +188,9 @@ for (const file of readdirSync(folder).filter(name => name.endsWith(".rows.json"
     textureMb: result.info?.stats?.textureMb,
     drawCalls: result.info?.stats?.drawCalls,
     fill: result.fill,
+    heapUsedMb: result.heapUsedMb,
+    pixiNodes: result.info?.pixiNodes,
+    flips: result.info?.flips,
     over16: rows.filter(row => ownOf(row) > 16.7).length,
     over33: rows.filter(row => ownOf(row) > 33.3).length,
     // The cause bits and the demand reasons of the frames over 16.7 ms.

@@ -3,6 +3,7 @@
  */
 import { Display, Layer, type Renderer, Transform, type World } from "../../../../src/index.ts";
 import { startingSession } from "../../state";
+import { type CullNode, createCullState } from "./cull";
 import type { StressApi, StressState } from "./types";
 
 /** The owner of the display object the fill estimate climbs from. */
@@ -28,7 +29,8 @@ export function createStressState(): StressState {
     stale: true,
     running: true,
     probe: undefined,
-    log: []
+    log: [],
+    cull: createCullState()
   };
 }
 
@@ -120,6 +122,38 @@ function addFill(
 }
 
 /**
+ * The stage of the page, reached from a display object of the bench's own: the first call hangs it, a later one
+ * climbs from it.
+ *
+ * @param state - The driver's state.
+ * @param renderer - The renderer: its Pixi module.
+ * @param world - The world.
+ * @returns The stage; `undefined` before Pixi is there and on the call that hangs the probe.
+ */
+export function stageOf(
+  state: StressState,
+  renderer: Pick<Renderer.Api, "host">,
+  world: Pick<World.Api, "ecs">
+): CullNode | undefined {
+  const pixi = renderer.host.pixi();
+
+  if (pixi === undefined) return undefined;
+
+  if (state.probe === undefined) {
+    state.probe = new pixi.Container();
+    world.ecs.spawn(PROBE_OWNER, [Layer({ name: "ui" }), Display({ object: state.probe })]);
+
+    return undefined;
+  }
+
+  let stage = state.probe as CullNode;
+
+  while (stage.parent !== undefined && stage.parent !== null) stage = stage.parent;
+
+  return stage === state.probe ? undefined : stage;
+}
+
+/**
  * What the page reads.
  *
  * @param state - The driver's state.
@@ -166,7 +200,13 @@ export function createStressApi(
     info: () => {
       const entities = [...world.ecs.query(Transform)].length;
 
-      return { session: startingSession, stats: renderer.stats(), entities };
+      return {
+        session: startingSession,
+        stats: renderer.stats(),
+        entities,
+        pixiNodes: state.cull.marked,
+        flips: state.cull.flips
+      };
     },
     fill: () => {
       const canvas = document.querySelector("canvas");
@@ -175,17 +215,9 @@ export function createStressApi(
 
       if (canvas === null || pixi === undefined) return { leaves: 0, mpx: 0, canvasMpx: 0 };
 
-      // The stage is reached from a display object of the bench's own: the first call hangs it, a later one climbs.
-      if (state.probe === undefined) {
-        state.probe = new pixi.Container();
-        world.ecs.spawn(PROBE_OWNER, [Layer({ name: "ui" }), Display({ object: state.probe })]);
+      const stage = stageOf(state, renderer, world) as Leaf | undefined;
 
-        return { leaves: 0, mpx: 0, canvasMpx: 0 };
-      }
-
-      let stage = state.probe as Leaf;
-
-      while (stage.parent !== undefined && stage.parent !== null) stage = stage.parent;
+      if (stage === undefined) return { leaves: 0, mpx: 0, canvasMpx: 0 };
 
       const scale = canvas.width / Math.max(1, canvas.clientWidth);
 

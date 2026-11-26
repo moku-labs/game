@@ -14,7 +14,8 @@ import {
   worldPlugin
 } from "../../../../src/index.ts";
 import { startingSession } from "../../state";
-import { createStressApi, createStressState } from "./api";
+import { createStressApi, createStressState, stageOf } from "./api";
+import { type CullPixi, cullFrame } from "./cull";
 import { walkFrame } from "./drive";
 
 /**
@@ -44,7 +45,22 @@ export const stressPlugin = createPlugin("stress", {
       }),
       ctx
         .require(timePlugin)
-        .onFrame("input", time => walkFrame(ctx.state, driven, startingSession, time))
+        .onFrame("input", time => walkFrame(ctx.state, driven, startingSession, time)),
+      // The culling experiment of the address, after the renderer's sync and before the draw.
+      ctx.require(timePlugin).onFrame("signals", () => {
+        // The probe hangs in the `ui` layer: not before the scene has mounted its layers.
+        if (startingSession.cull === "" || ctx.state.step < 90) return;
+
+        const renderer = ctx.require(rendererPlugin);
+
+        ctx.state.cull.stage ??= stageOf(ctx.state, renderer, driven.world);
+        cullFrame(
+          ctx.state,
+          renderer.host.pixi() as unknown as CullPixi,
+          driven.ui,
+          startingSession
+        );
+      })
     );
   },
   onStop: ctx => {

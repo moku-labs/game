@@ -47,6 +47,8 @@ export type SceneResult = {
   kinds: Record<string, KindReport>;
   info: unknown;
   fill: unknown;
+  /** The JS heap in use when the measured window ended, MB, as DevTools reports it. */
+  heapUsedMb: number;
   kind: string | undefined;
 };
 
@@ -183,6 +185,7 @@ export async function measureScene(
     );
   }
 
+  const usage = (await cdp.send("Runtime.getHeapUsage")) as { usedSize: number };
   const collections =
     tracing && options.tracer !== undefined
       ? collectionsOf(await options.tracer.stopTracing())
@@ -204,6 +207,7 @@ export async function measureScene(
     heap: heapOf(rows),
     collections,
     kinds: reportOf(rows, systems),
+    heapUsedMb: Math.round((usage.usedSize / 1_048_576) * 10) / 10,
     ...read
   };
 
