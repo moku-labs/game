@@ -1187,7 +1187,7 @@ if (mode === "phone") {
       .find(line => line.includes("mCurrentFocus"))
       ?.trim() ?? "";
 
-  console.log({ forwards, reverses, focus });
+  console.info({ forwards, reverses, focus });
 
   if (forwards !== "" || reverses !== "")
     throw new Error("a port is held on the phone: it is taken, nothing was touched");
@@ -1363,7 +1363,7 @@ try {
     const rows = (taken as { rows: number[][] }).rows;
     const own = ownOfRow;
 
-    console.log(
+    console.info(
       name,
       JSON.stringify({
         frames: rows.length,

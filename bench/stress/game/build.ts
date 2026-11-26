@@ -45,7 +45,7 @@ const suffix = values.names ? `${values.id}-names` : values.id;
  * @throws {Error} When the command failed.
  */
 async function run(cwd: string, ...words: string[]): Promise<void> {
-  console.log(`› ${words.join(" ")}`);
+  console.info(`› ${words.join(" ")}`);
 
   const child = Bun.spawn(words, { cwd, stdout: "inherit", stderr: "inherit" });
 
@@ -148,4 +148,4 @@ rmSync(copy, { recursive: true, force: true });
 rmSync(pack, { recursive: true, force: true });
 const built = path.join(keep, `game-${suffix}.apk`);
 
-console.log(`[stress] ${built}: the app ${identifier}.${values.id}.debug`);
+console.info(`[stress] ${built}: the app ${identifier}.${values.id}.debug`);

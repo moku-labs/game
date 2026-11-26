@@ -384,7 +384,7 @@ const table = [...groups].map(([key, list]) => {
 table.sort((left, right) => right.own.max + right.start.max - (left.own.max + left.start.max));
 
 if (flag === "--json") {
-  console.log(JSON.stringify({ scenarios, groups: table, gestures, peaks }, undefined, 1));
+  console.info(JSON.stringify({ scenarios, groups: table, gestures, peaks }, undefined, 1));
 } else {
   for (const [name, value] of Object.entries(scenarios)) {
     const rest = Object.fromEntries(
@@ -393,18 +393,18 @@ if (flag === "--json") {
       )
     );
 
-    console.log(name, JSON.stringify(rest));
+    console.info(name, JSON.stringify(rest));
   }
 
   for (const row of table) {
-    console.log(
+    console.info(
       `${String(row.n).padStart(3)}× ${row.key}\n      own ${row.own.p50}/${row.own.max} start ${row.start.p50}/${row.start.max} +${row.sinceMs}ms ` +
         `ph ${JSON.stringify(row.phases)} sys ${JSON.stringify(row.systems)} gpu ${row.gpu} draws ${row.draws} rb ${row.rebuilds} up ${row.uploads}/${row.uploadMb}MB sh ${row.compiles} causes ${JSON.stringify(row.causes)} reason ${JSON.stringify(row.reasons)} gc ${row.withGc}×${row.gcMs}ms ${row.gcKinds}`
     );
   }
 
   for (const entry of gestures.toSorted((left, right) => right.kb - left.kb).slice(0, 30)) {
-    console.log(
+    console.info(
       `heap ${String(entry.kb).padStart(8)} KB (max ${entry.kbMax}, n ${entry.n})  ${entry.scenario} | ${entry.label}`
     );
   }

@@ -94,12 +94,12 @@ function labelOf(frame: { functionName: string; lineNumber: number }): string {
  * @param unit - The unit of the value.
  */
 function print(title: string, entries: Map<string, number>, total: number, unit: string): void {
-  console.log(`\n${title}`);
+  console.info(`\n${title}`);
 
   for (const [label, value] of [...entries]
     .toSorted((left, right) => right[1] - left[1])
     .slice(0, top)) {
-    console.log(
+    console.info(
       `${((value / total) * 100).toFixed(1).padStart(6)} %  ${value.toFixed(1).padStart(10)} ${unit}  ${label}`
     );
   }
@@ -182,7 +182,7 @@ function printCallers(indexed: Indexed, name: string): void {
     callers.set(key, (callers.get(key) ?? 0) + ms);
   }
 
-  console.log(`under ${name}: ${whole.toFixed(1)} ms`);
+  console.info(`under ${name}: ${whole.toFixed(1)} ms`);
   print(`Callers of ${name} (share of its time)`, callers, whole, "ms");
 }
 
@@ -211,7 +211,7 @@ function printCallees(indexed: Indexed, name: string): void {
       callees.set(`${first}${second}`, (callees.get(`${first}${second}`) ?? 0) + ms);
   }
 
-  console.log(`under ${name}: ${whole.toFixed(1)} ms`);
+  console.info(`under ${name}: ${whole.toFixed(1)} ms`);
   print(`What ${name} calls (share of its time; "a > b" is b called from a)`, callees, whole, "ms");
 }
 
@@ -260,7 +260,7 @@ function readCpu(profile: CpuProfile): void {
     }
   }
 
-  console.log(`busy ${busy.toFixed(0)} ms, idle and program ${idle.toFixed(0)} ms`);
+  console.info(`busy ${busy.toFixed(0)} ms, idle and program ${idle.toFixed(0)} ms`);
   print("Time under a marker function (inclusive, share of busy time)", under, busy, "ms");
   print("Self time by function (share of busy time)", byFunction, busy, "ms");
 }
@@ -294,7 +294,7 @@ function readHeap(head: HeapNode): void {
   }
 
   walk(head, []);
-  console.log(`sampled ${(total / 1024).toFixed(0)} KB`);
+  console.info(`sampled ${(total / 1024).toFixed(0)} KB`);
   print(
     "Bytes by allocating function (share of the sampled bytes)",
     byFunction,

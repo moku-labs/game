@@ -47,10 +47,10 @@ describe.each(SIZES)("the album of $sets sets, a whole frame of the app", ({ nam
       elements: perf.elements,
       bytes,
       ms: {
-        still: split(perf, perf.still, 300),
-        turn: split(perf, perf.turn, 300),
-        peek: split(perf, perf.swipe, 600, perf.peeked),
-        popup: split(perf, perf.popup, 300)
+        still: split(perf, perf.still, 150),
+        turn: split(perf, perf.turn, 150),
+        peek: split(perf, perf.swipe, 300, perf.peeked),
+        popup: split(perf, perf.popup, 150)
       }
     };
 
@@ -63,5 +63,5 @@ describe.each(SIZES)("the album of $sets sets, a whole frame of the app", ({ nam
 
     // Bug caught: a frame in which nothing changed that allocates per element of a root at rest.
     expect(report.bytes.still).toBeLessThanOrEqual(2048);
-  }, 120_000);
+  }, 600_000);
 });

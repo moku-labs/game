@@ -62,4 +62,4 @@ const result = await Bun.build({
 if (!result.success)
   throw new Error(["[stress] build failed.", ...result.logs.map(String)].join("\n"));
 
-console.log(`[stress] agent page in ${out}: ${readdirSync(out).join(", ")}`);
+console.info(`[stress] agent page in ${out}: ${readdirSync(out).join(", ")}`);

@@ -46,7 +46,7 @@ for (const scene of scenes) {
   });
   const page = await context.newPage();
 
-  page.on("pageerror", error => console.log("pageerror", scene, String(error).slice(0, 300)));
+  page.on("pageerror", error => console.info("pageerror", scene, String(error).slice(0, 300)));
   await page.goto(`http://localhost:${server.port}/#${scene}`);
 
   const cdp = await context.newCDPSession(page);

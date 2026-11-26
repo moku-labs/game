@@ -60,7 +60,7 @@ for (const file of readdirSync(folder).filter(
   const layers = (sum / pixels / 255) * 16;
   const canvasMpx = (meta.canvas.width * meta.canvas.height) / 1e6;
 
-  console.log(
+  console.info(
     JSON.stringify({
       screen: meta.name,
       path: meta.canvas.path,

@@ -209,7 +209,7 @@ for (const file of readdirSync(folder).filter(name => name.endsWith(".rows.json"
 }
 
 if (flag === "--json") {
-  console.log(JSON.stringify(out, undefined, 1));
+  console.info(JSON.stringify(out, undefined, 1));
 } else {
   for (const [scene, value] of Object.entries(out)) {
     const entry = value as Record<string, unknown> & {
@@ -217,8 +217,8 @@ if (flag === "--json") {
     };
     const { kinds, ...head } = entry;
 
-    console.log(`\n## ${scene}\n${JSON.stringify(head)}`);
+    console.info(`\n## ${scene}\n${JSON.stringify(head)}`);
     for (const [kind, report] of Object.entries(kinds))
-      console.log(`  ${kind.padEnd(7)} ${JSON.stringify(report)}`);
+      console.info(`  ${kind.padEnd(7)} ${JSON.stringify(report)}`);
   }
 }

@@ -215,7 +215,7 @@ export async function measureScene(
   writeFileSync(path.join(options.out, `${name}.rows.json`), JSON.stringify({ systems, rows }));
   // The raw log of the monitor's stream, one line each, beside the results.
   writeFileSync(path.join(options.out, `${name}.stream.jsonl`), `${stream.join("\n")}\n`);
-  console.log(
+  console.info(
     scene,
     JSON.stringify({
       fps: result.fps,

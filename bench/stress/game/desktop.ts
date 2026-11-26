@@ -39,7 +39,7 @@ const context = await browser.newContext({
 });
 const page = await context.newPage();
 
-page.on("pageerror", error => console.log("pageerror", String(error).slice(0, 300)));
+page.on("pageerror", error => console.info("pageerror", String(error).slice(0, 300)));
 await page.goto(`http://localhost:${server.port}/`);
 
 if (throttle !== undefined) {
@@ -48,5 +48,5 @@ if (throttle !== undefined) {
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: Number(throttle) });
 }
 
-console.log(`ready on 9353, page http://localhost:${server.port}/`);
+console.info(`ready on 9353, page http://localhost:${server.port}/`);
 await new Promise(() => undefined);
