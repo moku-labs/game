@@ -382,8 +382,8 @@ export function sampleBornLive(actx: AnimCtx): void {
 
 /**
  * The world system that writes the first sample of the tracks born since the frame step (F241). `world` keeps a
- * system of this name last before `renderer.sync`, after the enter hooks of `ui.enter`, so the renderer draws a view
- * at its enter's start in the frame it is first drawn.
+ * system of this name before the filters and `renderer.sync`, after the enter hooks of `ui.enter`, so the renderer
+ * draws a view at its enter's start in the frame it is first drawn.
  *
  * @param actx - Domain context of the anim plugin.
  * @returns The system definition `world.ecs.system` takes.

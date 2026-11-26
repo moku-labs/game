@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { component, system } from "../../ecs/define";
-import { DRAWS_SYSTEM, SAMPLES_SYSTEM } from "../../ecs/systems";
+import { DRAWS_SYSTEM, FILTERS_SYSTEM, SAMPLES_SYSTEM } from "../../ecs/systems";
 import type { Owner, WorldPhase } from "../../ecs/types";
 import { createMockWorld } from "./mock-world";
 
@@ -75,6 +75,24 @@ describe("ecs systems", () => {
     world.frame();
 
     expect(order).toEqual(["game.sync", "ui.enter", SAMPLES_SYSTEM, DRAWS_SYSTEM]);
+  });
+
+  // Bug (F241, 0.15.170): the filters ran before the sampler, so a first sample of an `Alpha` walk reached Pixi a frame
+  // late and the window was drawn whole in its first frame.
+  it("keeps the filters between the sampler and renderer.sync, whatever order the three come in", () => {
+    const world = createMockWorld();
+    const order: string[] = [];
+
+    world.api.ecs.spawn(test, [Marker()]);
+    world.api.ecs.system(recorder(FILTERS_SYSTEM, "sync", order));
+    world.api.ecs.system(recorder(DRAWS_SYSTEM, "sync", order));
+    world.api.ecs.system(recorder("ui.enter", "sync", order));
+    world.api.ecs.system(recorder(SAMPLES_SYSTEM, "sync", order));
+    world.api.ecs.system(recorder("game.sync", "sync", order));
+    world.start();
+    world.frame();
+
+    expect(order).toEqual(["ui.enter", "game.sync", SAMPLES_SYSTEM, FILTERS_SYSTEM, DRAWS_SYSTEM]);
   });
 
   it("refuses a duplicate system name and returns a remover", () => {
