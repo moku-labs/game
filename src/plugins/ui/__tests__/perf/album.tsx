@@ -189,7 +189,7 @@ function dots(on: number) {
  * @param side - Its side: -1 left, 1 right.
  * @returns The root's tree.
  */
-function albumTree(on: number, beside: number, side: -1 | 1): DescriptionNode {
+export function albumTree(on: number, beside: number, side: -1 | 1): DescriptionNode {
   return (
     <stack key="albumRoot" style={{ width: 390, height: 844 }}>
       {overview()}

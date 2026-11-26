@@ -26,7 +26,7 @@ export type AlbumPerf = {
   render: (tree: DescriptionNode) => void;
   /** One turn and back: the two pages of the strip swap places, then the reconcile, the solve and the enter. */
   turn: Step;
-  /** The next step of the swipe through the sets, then the reconcile, the solve and the enter. */
+  /** The next step of the swipe through the sets, then one whole frame of the app. */
   swipe: Step;
 };
 
@@ -70,6 +70,8 @@ export async function startAlbumPerf(): Promise<AlbumPerf> {
     tree.node = node;
     ecs.set(root, Tree, NO_PATCH);
   };
+  // The systems of `ui` a commit runs: the layout phase and the enter of phase `sync`. A turn marks the same entities
+  // at every call, so its change lists stay as they are.
   const frame = (): void => {
     ui.reconcile();
     ui.solve();
@@ -98,7 +100,8 @@ export async function startAlbumPerf(): Promise<AlbumPerf> {
           ? (ALBUM.peek[set] as DescriptionNode)
           : (ALBUM.turned[set] as DescriptionNode)
       );
-      frame();
+      // A whole frame of the app: a peek mounts a page and drops one, and phase `signals` empties the change lists.
+      ui.app.time.step(16);
     }
   };
 }
