@@ -31,7 +31,21 @@ export type AlbumPerf = {
   turn: Step;
   /** The next step of the swipe through the sets, then one whole frame of the app. */
   swipe: Step;
+  /**
+   * The reconcile of a turn alone: the root's tree is written, `ui.reconcile` runs, nothing else. Every
+   * `RECONCILE_SETTLE` calls it also solves, enters and runs frames, so the entities and the layout of the root do not
+   * pile up; a median is not moved by that one call in 64.
+   */
+  turnReconcile: Step;
+  /**
+   * The reconcile of a peek alone: the root's tree goes between `turned[0]` and `peek[1]`, so every call mounts the
+   * page beside and drops the other, as a peek does; nothing else runs but the settle of `turnReconcile`.
+   */
+  peekReconcile: Step;
 };
+
+/** Calls of a reconcile-only step between two settles of the root. */
+const RECONCILE_SETTLE = 64;
 
 /**
  * The entity of the album root: the one whose `Tree` carries the first peek.
@@ -85,7 +99,18 @@ export async function startAlbumPerf(): Promise<AlbumPerf> {
     ui.enter();
   };
   // The step of each walk lives in a cell: a number in a closure would be a new heap number.
-  const at = new Int32Array(2);
+  const at = new Int32Array(6);
+  // The reconcile alone leaves the solve and the enter undone: now and then they run, outside what a median sees.
+  const settle = (): void => {
+    at[5] = (at[5] ?? 0) + 1;
+
+    if ((at[5] ?? 0) % RECONCILE_SETTLE !== 0) return;
+
+    ui.solve();
+    ui.enter();
+
+    for (let step = 0; step < SETTLE_FRAMES; step += 1) ui.app.time.step(16);
+  };
 
   return {
     ui,
@@ -109,6 +134,20 @@ export async function startAlbumPerf(): Promise<AlbumPerf> {
       );
       // A whole frame of the app: a peek mounts a page and drops one, and phase `signals` empties the change lists.
       ui.app.time.step(16);
+    },
+    turnReconcile: (): void => {
+      at[2] = at[2] === 0 ? 1 : 0;
+      render(at[2] === 1 ? (ALBUM.turned[0] as DescriptionNode) : ALBUM.first);
+      ui.reconcile();
+      settle();
+    },
+    peekReconcile: (): void => {
+      at[3] = at[3] === 0 ? 1 : 0;
+      render(
+        at[3] === 1 ? (ALBUM.turned[0] as DescriptionNode) : (ALBUM.peek[1] as DescriptionNode)
+      );
+      ui.reconcile();
+      settle();
     }
   };
 }

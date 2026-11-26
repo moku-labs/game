@@ -198,15 +198,15 @@ const CONTENT_STYLE: Style = Object.freeze({ origin: "topLeft" });
 const CONTENT_ROW_STYLE: Style = Object.freeze({ origin: "topLeft", direction: "row" });
 
 /**
- * The props, besides `style`, `state` and `content`, that a live element is written from: `bind`,
+ * The props, besides `style`, `state`, `content` and `bind`, that a live element is written from:
  * `texture`, `name` and `fit` reach its visual, `intent`, `payload`, `point`, `local` and `escape`
- * its input, `components` its extras. Every other prop is read from the node where it is used, at
- * every patch: `hosts`, the props of a windowed scroll, the props of a text field, and the
- * children. `motion` writes nothing: the patch stores it on the element at every render, and a new
- * identity of the same look rewrites nothing a running tween holds (F168).
+ * its input, `components` its extras. `bind` reaches its visual too; `compare` reads it itself, once,
+ * because it also says whether a text keeps its `Text`. Every other prop is read from the node where
+ * it is used, at every patch: `hosts`, the props of a windowed scroll, the props of a text field,
+ * and the children. `motion` writes nothing: the patch stores it on the element at every render, and
+ * a new identity of the same look rewrites nothing a running tween holds (F168).
  */
 const WRITTEN: readonly string[] = [
-  "bind",
   "texture",
   "name",
   "fit",
@@ -255,21 +255,21 @@ type Change = {
  * Tells whether two nodes write the same visual, input and extras: every prop of `WRITTEN` says
  * the same, as `sameValue` reads it.
  *
- * @param previous - The node the element was last patched from.
- * @param next - The node of this render.
+ * @param previous - The props of the node the element was last patched from.
+ * @param next - The props of the node of this render.
  * @returns True when no component of the element has to be written for these props.
  * @example
  * ```ts
- * writesSame({ type: "row", props: { payload: { id: 1 } }, children: [] }, { type: "row", props: { payload: { id: 2 } }, children: [] }); // false
+ * writesSame({ payload: { id: 1 } }, { payload: { id: 2 } }); // false
  * ```
  */
-function writesSame(previous: DescriptionNode, next: DescriptionNode): boolean {
+function writesSame(previous: DescriptionNode["props"], next: DescriptionNode["props"]): boolean {
   // Per patch: an index walk, no callback.
   // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
   for (let index = 0; index < WRITTEN.length; index += 1) {
     const name = WRITTEN[index] ?? "";
 
-    if (!sameValue(previous.props[name], next.props[name])) return false;
+    if (!sameValue(previous[name], next[name])) return false;
   }
 
   return true;
@@ -385,18 +385,38 @@ export function isNameOf(
 ): boolean {
   const type = node.type;
   const tail = identity.length - type.length - 1;
-  const framed = tail >= head && identity.charCodeAt(tail) === BAR && identity.endsWith(type);
+  const framed =
+    tail >= head && identity.charCodeAt(tail) === BAR && isTextAt(identity, type, tail + 1);
 
   if (!framed) return false;
   if (node.key !== undefined)
-    return tail - head === node.key.length && identity.startsWith(node.key, head);
+    return tail - head === node.key.length && isTextAt(identity, node.key, head);
 
   // An unkeyed name: the type, `@`, then the digits of the index.
   const at = head + type.length;
 
-  if (!identity.startsWith(type, head) || identity.charCodeAt(at) !== AT) return false;
+  if (!isTextAt(identity, type, head) || identity.charCodeAt(at) !== AT) return false;
 
   return isIndexAt(identity, at, tail, index);
+}
+
+/**
+ * Tells whether a text stands in an identity at a place: `startsWith(text, at)` read in place, one unit a
+ * step, so a short compare is no call into the string builtins.
+ *
+ * @param identity - The identity an element keeps.
+ * @param text - The key or the type.
+ * @param at - Where the text should start.
+ * @returns True when the units from `at` are the text's.
+ */
+function isTextAt(identity: string, text: string, at: number): boolean {
+  if (at < 0 || at + text.length > identity.length) return false;
+
+  for (let unit = 0; unit < text.length; unit += 1) {
+    if (identity.charCodeAt(at + unit) !== text.charCodeAt(unit)) return false;
+  }
+
+  return true;
 }
 
 /**
@@ -1798,14 +1818,22 @@ export function createReconciler(
    * @param root - The root being reconciled: its covered flag is one of the state flags.
    * @param element - The element that stayed.
    * @param node - The node of this render.
+   * @param parent - The element whose children are diffed, when it is the parent of `element`.
    * @returns The flags and the style of this render, and what they change.
    */
-  function compare(root: Root, element: Element, node: DescriptionNode): Change {
-    const previous = element.node;
-    const parent = parentOf(element);
+  function compare(
+    root: Root,
+    element: Element,
+    node: DescriptionNode,
+    parent: Element | undefined
+  ): Change {
+    // Each prop is read from each node once: a props object has the shape of its tag and its markup, so the
+    // read is a lookup in a table of shapes, and a patch of a root of hundreds of elements makes thousands.
+    const before = element.node.props;
+    const after = node.props;
     // The flags the node and the root give, checked against the element's own first: while they
     // hold, the element keeps its flags object and none is built.
-    const declared = node.props.state as Partial<IsFlags> | undefined;
+    const declared = after.state as Partial<IsFlags> | undefined;
     const kept = element.is;
     const flagsHold =
       kept.covered === root.covered &&
@@ -1826,14 +1854,16 @@ export function createReconciler(
     const stands = element.basis?.epoch === state.epoch && element.basis.rowHeight === rowHeight;
 
     // Keep the resolved style while the raw one and the flags say the same; else resolve again.
-    const sameStyle = sameValue(previous.props.style, node.props.style);
+    const sameStyle = sameValue(before.style, after.style);
     const keepsStyle = stands && sameStyle && sameValue(element.is, is);
     const style = keepsStyle ? element.style : styleFor(parent, node, is);
-    const sameContent = sameValue(previous.props.content, node.props.content);
+    const sameContent = sameValue(before.content, after.content);
+    const sameBind = sameValue(before.bind, after.bind);
 
-    // Two property reads: a new viewport may resolve the same markup to another key (F182).
+    // A kept style names the key it named, and a raw style that says the same the key it wrote; else two
+    // property reads: a new viewport may resolve the same markup to another key (F182).
     const keepsKey =
-      namedKeyOf(element.style, previous.props.style) === namedKeyOf(style, node.props.style);
+      keepsStyle || namedKeyOf(element.style, before.style) === namedKeyOf(style, after.style);
 
     // One object per reconciler, written in place: the patch reads it before the next compare.
     change.is = is;
@@ -1842,9 +1872,9 @@ export function createReconciler(
     change.resolved = !keepsStyle;
     change.moved = !keepsStyle && modules.layout.affectsRect(element.style, style);
     change.measures = !stands || !sameStyle || !sameContent;
-    change.keepsText = sameStyle && sameContent && sameValue(previous.props.bind, node.props.bind);
+    change.keepsText = sameStyle && sameContent && sameBind;
     change.keepsKey = keepsKey;
-    change.unchanged = keepsStyle && sameContent && writesSame(previous, node);
+    change.unchanged = keepsStyle && sameContent && sameBind && writesSame(before, after);
 
     return change;
   }
@@ -1952,17 +1982,25 @@ export function createReconciler(
    * @param element - The element that stayed.
    * @param node - The node of this render.
    * @param instance - The identity of the nearest component instance.
+   * @param parent - The element whose children are diffed: the parent of `element`, which is not looked up again.
    */
   function patch(
     root: Root,
     element: Element,
     node: DescriptionNode,
-    instance: string | undefined
+    instance: string | undefined,
+    parent: Element | undefined
   ): void {
     checkWindow(node);
     warnAxis(element, node);
 
-    const change = compare(root, element, node);
+    // The element the diff came from is its parent: a lookup is for an element the diff reached another way.
+    const change = compare(
+      root,
+      element,
+      node,
+      element.parent === parent?.entity ? parent : parentOf(element)
+    );
     // The record is the reconciler's one: what the patch reads after a call out is taken now.
     const { unchanged, rowHeight } = change;
     const motion = node.props.motion as ElementMotion | undefined;
@@ -2135,7 +2173,7 @@ export function createReconciler(
       element !== undefined && element.type === effective.type && element.key === effective.key;
 
     if (isSame) {
-      patch(root, element, effective, owner);
+      patch(root, element, effective, owner, parent);
 
       return element.entity;
     }
@@ -2254,22 +2292,29 @@ export function createReconciler(
     entityStack[level] = placed;
 
     // The old children this render leaves out leave first, so a key a new child shares with one of
-    // them, or with an element under it, is the new child's (F84).
+    // them, or with an element under it, is the new child's (F84). The walk that names the children
+    // sees each old child at its index: while every one keeps its identity there and no child is
+    // left over, none leaves, and `leaveOut` has nothing to find (and looks no child up again).
+    let settled = before.length <= nodes.length;
+
     // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing, also cold.
     for (let index = 0; index < nodes.length; index += 1) {
       const node = nodes[index];
       const old = before[index];
 
-      if (node === undefined) continue;
-      identities[index] = childIdentity(
-        parent,
-        node,
-        index,
-        old === undefined ? undefined : state.elements.get(old)
-      );
+      if (node === undefined) {
+        settled = false;
+        continue;
+      }
+
+      const standing = old === undefined ? undefined : state.elements.get(old);
+      const identity = childIdentity(parent, node, index, standing);
+
+      identities[index] = identity;
+      if (standing !== undefined && identity !== standing.identity) settled = false;
     }
 
-    leaveOut(parent, identities, nodes.length);
+    if (!settled) leaveOut(parent, identities, nodes.length);
 
     // Diff each child of this render; a component that threw before its first view has no entity.
     let count = 0;
