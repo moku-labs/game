@@ -1,5 +1,5 @@
 /**
- * @file anim/tween — the CSS timing function `cubic-bezier(x1, y1, x2, y2)` as an easing. The
+ * @file world/projection — the CSS timing function `cubic-bezier(x1, y1, x2, y2)` as an easing. The
  * curve is solved once, into a table of its progress at 512 even steps of time; a frame reads two
  * cells and draws a line between them. Where a line strays from the curve (the curve leaves an end
  * vertically), that step is solved again at each call, inside the bracket the table keeps. Either

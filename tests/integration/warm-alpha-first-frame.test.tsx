@@ -18,6 +18,7 @@ import {
   effectsPlugin,
   projection,
   screen,
+  system,
   type
 } from "../../src";
 import type { Manifest } from "../../src/plugins/assets/types";
@@ -75,6 +76,24 @@ function fadeIn(ms: number): ElementMotion {
       )
   };
 }
+
+/**
+ * The game's system of phase `sync` that switches the `Alpha` filter of an element by its alpha, as A Memory Missing's
+ * `shared.alphaGate` does: off while the element is whole, so a whole element costs no pass, on while it fades. It
+ * reads the alpha of the frame it runs in, so it must see an enter's start pose.
+ */
+const alphaGate = system({
+  name: "fade.alphaGate",
+  phase: "sync",
+  query: [Alpha],
+  run: (rows, { world }) => {
+    for (const [entity, alpha] of rows) {
+      const on = alpha.alpha < 0.999;
+
+      if (alpha.enabled !== on) world.set(entity, Alpha, { enabled: on });
+    }
+  }
+});
 
 /** The board under the ladder. */
 const board = projection({
@@ -171,6 +190,7 @@ function gameOf(warm: boolean) {
     main,
     feature: defineFeature("fade", {
       flows: [main],
+      systems: [alphaGate],
       scenes: [home],
       projections: [board, veil, ladder],
       strings: { en: english }

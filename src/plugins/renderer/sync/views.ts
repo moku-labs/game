@@ -513,6 +513,72 @@ export function applyHud(sctx: SyncCtx, entity: Entity, view: View, factor: numb
 }
 
 /**
+ * Draws a HUD part at the pose of a HUD return's walk (F245): the six numbers of `pose` (`dx`, `dy`, `rotation`, `scale`,
+ * `scaleX`, `scaleY`) compared with the view's, and only when one differs written there and composed onto the part's
+ * top by `applyTransform`, which marks the move. The ECS `Transform` is never written: layout, hit boxes of the game
+ * and snapshots never see the pose. A pose equal to the view's writes nothing.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity of the part.
+ * @param view - Its view.
+ * @param pose - The six numbers, rest `0, 0, 0, 1, 1, 1`.
+ */
+export function applyHudPose(
+  sctx: SyncCtx,
+  entity: Entity,
+  view: View,
+  pose: Readonly<Float64Array>
+): void {
+  if (!writeHudPose(view, pose)) return;
+
+  // The whole transform is written, its rotation too.
+  view.hudTurned = false;
+  applyTransform(sctx, entity, view);
+}
+
+/**
+ * Writes the pose of a HUD return's walk (F245) into a view's six `hud*` numbers when one differs, and nothing else; a
+ * new rotation is noted in `hudTurned`. The caller composes the pose onto the part's top: `applyTransform`, or in the
+ * step of the HUD parts `applyHudTop` and `applyHudTurn`, each in a walk of its own after the walk that samples the
+ * poses, so the numbers Pixi takes are not handed across a call V8 does not inline.
+ *
+ * @param view - The view of the part.
+ * @param pose - The six numbers, rest `0, 0, 0, 1, 1, 1`.
+ * @returns True when the view's pose changed: its top owes a transform write.
+ */
+export function writeHudPose(view: View, pose: Readonly<Float64Array>): boolean {
+  // per frame and part: six numbers read by index and compared, nothing written at rest.
+  const dx = pose[0] ?? 0;
+  const dy = pose[1] ?? 0;
+  const rotation = pose[2] ?? 0;
+  const scale = pose[3] ?? 1;
+  const scaleX = pose[4] ?? 1;
+  const scaleY = pose[5] ?? 1;
+
+  if (
+    view.hudDx === dx &&
+    view.hudDy === dy &&
+    view.hudRotation === rotation &&
+    view.hudScale === scale &&
+    view.hudScaleX === scaleX &&
+    view.hudScaleY === scaleY
+  ) {
+    return false;
+  }
+
+  if (view.hudRotation !== rotation) view.hudTurned = true;
+
+  view.hudDx = dx;
+  view.hudDy = dy;
+  view.hudRotation = rotation;
+  view.hudScale = scale;
+  view.hudScaleX = scaleX;
+  view.hudScaleY = scaleY;
+
+  return true;
+}
+
+/**
  * Writes the `Sprite` component onto its display object: the texture, or its crop for a `"cover"`
  * sprite, the blend, the stretch into the box, and the box as the hit box, the anchor applied. The stretch and
  * the hit box are written into the view's own objects. A new stretch of a view without a wrapper
@@ -1134,7 +1200,9 @@ export function writeVisual(sctx: SyncCtx, entity: Entity, view: View): void {
  * per-axis factor (`scaleX`, `scaleY`, 1 when absent) on each axis. The stretch of the
  * visual (a sized sprite, the 64 x 64 placeholder) is folded into the object's scale, so the
  * pivot is written in the object's own units. A wrapper carries the pose instead, and the visual
- * inside it keeps only its stretch.
+ * inside it keeps only its stretch. The pose of a HUD return's walk (F245, the view's `hud*` numbers) is composed on
+ * top: its offsets add to the position and the rotation, its factors multiply the scale; at rest they change nothing.
+ * `applyHudTop` writes the same top pose by the same sums for the step of the HUD parts.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -1149,12 +1217,12 @@ export function applyTransform(sctx: SyncCtx, entity: Entity, view: View): void 
   // leaves the multiplication out, boxes a fractional product (one allocation per view per pass).
   const factorX = "scaleX" in value ? (value.scaleX ?? 1) : 1;
   const factorY = "scaleY" in value ? (value.scaleY ?? 1) : 1;
-  const scaleX = value.scale * factorX;
-  const scaleY = value.scale * factorY;
+  const scaleX = value.scale * factorX * view.hudScale * view.hudScaleX;
+  const scaleY = value.scale * factorY * view.hudScale * view.hudScaleY;
 
   // The top's own pose moves the view: a kept picture follows it (P9.4). Writes inside a wrapper change the picture.
-  writePoint(sctx, entity, target.position, value.x, value.y, markMoved);
-  writeRotation(sctx, entity, target, value.rotation, markMoved);
+  writePoint(sctx, entity, target.position, value.x + view.hudDx, value.y + view.hudDy, markMoved);
+  writeRotation(sctx, entity, target, value.rotation + view.hudRotation, markMoved);
 
   if (view.wrapper === undefined) {
     writePoint(sctx, entity, target.scale, scaleX * stretch.x, scaleY * stretch.y, markMoved);
@@ -1176,6 +1244,70 @@ export function applyTransform(sctx: SyncCtx, entity: Entity, view: View): void 
   writeRotation(sctx, entity, view.object, 0);
   writePoint(sctx, entity, view.object.pivot, 0, 0);
   writePoint(sctx, entity, view.object.scale, stretch.x, stretch.y);
+}
+
+/**
+ * The position and the scale `applyHudTop` writes onto a part's top, through Pixi's `copyFrom`: a place with a walk's
+ * offset added is a fraction, and a fraction handed to a call V8 does not inline is boxed (16 B a number;
+ * `point.set(x, y)` takes two). Written in place.
+ */
+const PLACE = { x: 0, y: 0 };
+const SIZE = { x: 0, y: 0 };
+
+/**
+ * Draws the place and the size of a HUD return's walk (F245) the view's `hud*` numbers hold onto the part's top: the
+ * position and the scale, by the sums `applyTransform` writes there (the pivot and a wrapper's visual are not the
+ * walk's), compared with what Pixi holds, marked as a move when one differs, and copied from `PLACE` and `SIZE`. The
+ * rotation is `applyHudTurn`'s.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity of the part.
+ * @param view - Its view.
+ */
+export function applyHudTop(sctx: SyncCtx, entity: Entity, view: View): void {
+  const value = sctx.ctx.deps.world.ecs.get(entity, Transform) ?? Transform.defaults;
+  const target = view.wrapper ?? view.object;
+  const stretch: Point = view.drawScale;
+  const factorX = "scaleX" in value ? (value.scaleX ?? 1) : 1;
+  const factorY = "scaleY" in value ? (value.scaleY ?? 1) : 1;
+  const scaleX = value.scale * factorX * view.hudScale * view.hudScaleX;
+  const scaleY = value.scale * factorY * view.hudScale * view.hudScaleY;
+  const isWrapped = view.wrapper !== undefined;
+  const { position, scale } = target;
+
+  PLACE.x = value.x + view.hudDx;
+  PLACE.y = value.y + view.hudDy;
+  SIZE.x = isWrapped ? scaleX : scaleX * stretch.x;
+  SIZE.y = isWrapped ? scaleY : scaleY * stretch.y;
+
+  const isSame =
+    position.x === PLACE.x && position.y === PLACE.y && scale.x === SIZE.x && scale.y === SIZE.y;
+
+  if (isSame) return;
+
+  markMoved(sctx, entity);
+  position.copyFrom(PLACE);
+  scale.copyFrom(SIZE);
+}
+
+/**
+ * Turns a HUD part's top by the rotation of its `Transform` plus its walk's (F245), the sum `applyTransform` writes
+ * there, when the walk turned it (`hudTurned`), marked as a move. Pixi's rotation is not read: V8 inlines neither its
+ * getter nor its setter into a larger function here and boxes the fraction each takes or gives (measured, 16 B each a
+ * part and frame of a turning walk); the step of the HUD parts calls this one in a walk of its own.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity of the part.
+ * @param view - Its view.
+ */
+export function applyHudTurn(sctx: SyncCtx, entity: Entity, view: View): void {
+  if (!view.hudTurned) return;
+
+  const value = sctx.ctx.deps.world.ecs.get(entity, Transform) ?? Transform.defaults;
+
+  view.hudTurned = false;
+  markMoved(sctx, entity);
+  (view.wrapper ?? view.object).rotation = value.rotation + view.hudRotation;
 }
 
 /**
@@ -1497,6 +1629,14 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
     hiddenSelf: 0,
     hiddenTop: 0,
     hud: 1,
+    hudDx: 0,
+    hudDy: 0,
+    hudRotation: 0,
+    hudScale: 1,
+    hudScaleX: 1,
+    hudScaleY: 1,
+    hudWalking: false,
+    hudTurned: false,
     held: false
   };
 

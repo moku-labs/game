@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { component, system } from "../../ecs/define";
-import { DRAWS_SYSTEM, FILTERS_SYSTEM, SAMPLES_SYSTEM } from "../../ecs/systems";
+import { DRAWS_SYSTEM, FILTERS_SYSTEM, POSES_SYSTEM, SAMPLES_SYSTEM } from "../../ecs/systems";
 import type { Owner, WorldPhase } from "../../ecs/types";
 import { createMockWorld } from "./mock-world";
 
@@ -93,6 +93,25 @@ describe("ecs systems", () => {
     world.frame();
 
     expect(order).toEqual(["ui.enter", "game.sync", SAMPLES_SYSTEM, FILTERS_SYSTEM, DRAWS_SYSTEM]);
+  });
+
+  // Bug (F241, 0.15.174): the first sample of an enter a `layout` pose started was written only in the tail, so a game
+  // system of `sync` registered before anim (A Memory Missing's alpha gate) read the rest pose and switched the
+  // window's `Alpha` filter off in its first frame.
+  it("runs the pose sampler first in phase sync, before the game's systems registered earlier", () => {
+    const world = createMockWorld();
+    const order: string[] = [];
+
+    world.api.ecs.spawn(test, [Marker()]);
+    world.api.ecs.system(recorder("game.gate", "sync", order));
+    world.api.ecs.system(recorder(DRAWS_SYSTEM, "sync", order));
+    world.api.ecs.system(recorder(POSES_SYSTEM, "sync", order));
+    world.api.ecs.system(recorder(SAMPLES_SYSTEM, "sync", order));
+    world.api.ecs.system(recorder("ui.enter", "sync", order));
+    world.start();
+    world.frame();
+
+    expect(order).toEqual([POSES_SYSTEM, "game.gate", "ui.enter", SAMPLES_SYSTEM, DRAWS_SYSTEM]);
   });
 
   it("refuses a duplicate system name and returns a remover", () => {

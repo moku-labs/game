@@ -97,6 +97,15 @@ export const BUDGET = {
   // F240 verify: new, measured 0 B. The run of `hudReturnRunning` in frames the clock marks idle: the clock
   // woken at every step.
   hudReturnIdle: 0,
+  // F245: new. A run in its fade with a motion: a named top `ease`, a tuple in the gems' key of `parts` and a
+  // three-key walk with a curve per key. Every step eases three factors in a cell (a name through `easeCell`, the tuple
+  // through its table), samples three poses from the flattened keys into the module scratch, and draws them on the
+  // parts' tops through `applyHudPose`.
+  hudReturnWalking: 0,
+  // F245: new. The value of `hudReturnWalking` on a landed overlay, written again before every step as a new object
+  // with the same curves and keys: compared field by field and key by key, the copy kept (no curve solved, no keys
+  // flattened again).
+  hudReturnWalkRewritten: 0,
   // A26 heap profile: before 22 400 B (a new SDF shader made at every layout of a text and dropped by Pixi: its bind
   // groups, its resource accessors, its uniform group); then 2 831 B with the text's own shader kept. S: the text gets
   // no shader at all; measured 2 767 B, all of it Pixi laying the label out again (its graphics context's

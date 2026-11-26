@@ -4,7 +4,7 @@
  * decision (spec 22 O5–O10). A game without an overlay and a HUD part pays one size check.
  */
 import type { Entity, LayerSpec } from "../../world/types";
-import { HudPart, Overlay, OverlayLevel, type OverlayValue } from "../components";
+import { HudPart, Overlay, OverlayLevel, type OverlayValue, Transform } from "../components";
 import type { OverlayEventDetail, PixiContainer, PixiModule } from "../types";
 import { dropUnder, dropUnders, stepDims, stepHold, stepParts } from "./overlay-look";
 import { clearRange, rangeHolds, stepRange } from "./overlay-range";
@@ -12,6 +12,7 @@ import {
   clampedReturn,
   endReturnOf,
   endReturns,
+  HUD_REST,
   runOf,
   sameReturn,
   startReturn,
@@ -29,6 +30,7 @@ import type {
   SyncCtx,
   SyncState
 } from "./types";
+import { applyHudPose, writeHudPose } from "./views";
 
 /** How deep a `Parent` chain or a walk up the tree goes. */
 const MAX_DEPTH = 32;
@@ -136,8 +138,9 @@ function clampInto(
 
 /**
  * Copies an overlay's `hudReturn` again when the marker carries a new value (F240): one reference compared a frame; a
- * new reference with the same times (an inline literal a render writes again) keeps the copy; a malformed one is absent,
- * warned once.
+ * new reference with the same times, curves and keys (an inline literal a render writes again) keeps the copy; a
+ * malformed one is absent, warned once. A curve or keys the copy could not read (F245) are warned once per overlay
+ * each, with the key of `parts` they are in.
  *
  * @param sctx - Domain context of the sync module.
  * @param record - The overlay.
@@ -147,17 +150,33 @@ function copyReturn(sctx: SyncCtx, record: OverlayRecord, raw: Readonly<OverlayV
   // per frame: one reference compared; a write of the marker gives a new value, and only then is it read.
   if (raw.hudReturn === record.hudReturnRaw) return;
 
-  // The same times in a new object: compared field by field, nothing made.
+  // The same value in a new object: compared field by field, nothing made.
   const isSame = sameReturn(raw.hudReturn, record.hudReturnRaw);
 
   record.hudReturnRaw = raw.hudReturn;
 
   if (isSame) return;
 
-  record.hudReturn = clampedReturn(raw.hudReturn);
+  const copy = clampedReturn(raw.hudReturn);
 
-  if (raw.hudReturn !== undefined && record.hudReturn === undefined) {
+  record.hudReturn = copy;
+
+  if (raw.hudReturn !== undefined && copy === undefined) {
     warnOnce(sctx, "renderer:overlay-hud-return-ignored", record.entity, {});
+  }
+
+  if (copy?.badEase === true) {
+    warnOnce(sctx, "renderer:hud-return-ease", record.entity, {
+      label: record.label,
+      part: copy.badEasePart
+    });
+  }
+
+  if (copy?.badKeys === true) {
+    warnOnce(sctx, "renderer:hud-return-keys", record.entity, {
+      label: record.label,
+      part: copy.badKeysPart
+    });
   }
 }
 
@@ -565,6 +584,36 @@ function ownedRange(overlay: OverlayState, record: OverlayRecord): ActiveRange |
     : undefined;
 }
 
+/** What the walks of the records and the marked entities read, set before them: no closure per frame. */
+const seeWalk: { sctx: SyncCtx | undefined } = { sctx: undefined };
+
+/**
+ * Marks a record not seen yet in this frame's walk of the marked entities.
+ *
+ * @param record - The record.
+ */
+function unsee(record: OverlayRecord): void {
+  record.seen = false;
+}
+
+/**
+ * Sees one entity that carries `Overlay` in the walk of `stepOverlays`.
+ *
+ * @param entity - The entity.
+ */
+function see(entity: Entity): void {
+  if (seeWalk.sctx !== undefined) seeOverlay(seeWalk.sctx, entity);
+}
+
+/**
+ * Drops a record whose entity was not seen in this frame's walk: its `Overlay` is gone.
+ *
+ * @param record - The record.
+ */
+function dropUnseen(record: OverlayRecord): void {
+  if (!record.seen && seeWalk.sctx !== undefined) dropRecord(seeWalk.sctx, record);
+}
+
 /**
  * Tells whether the overlay step has nothing to do: no marked entity, no HUD part, no record, no range held and no
  * return of the HUD in progress.
@@ -612,17 +661,35 @@ export function stepOverlays(sctx: SyncCtx): void {
   // Before the overlays are seen: a run a leave starts this frame counts from 0.
   if (overlay.returns.length > 0) stepReturns(sctx);
 
-  for (const record of overlay.records.values()) record.seen = false;
-  for (const entity of overlay.entities) seeOverlay(sctx, entity);
-  for (const record of overlay.records.values()) if (!record.seen) dropRecord(sctx, record);
+  // per frame: a Map and a Set walked with `forEach` and callbacks made once, the order by index: a `for…of` V8 does not
+  // fold away builds an iterator of 40 B a walk (measured on the still frame of a sheet that holds the HUD).
+  seeWalk.sctx = sctx;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, no iterator.
+  overlay.records.forEach(unsee);
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
+  overlay.entities.forEach(see);
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, no iterator.
+  overlay.records.forEach(dropUnseen);
+  seeWalk.sctx = undefined;
 
   sortOrder(overlay);
-  for (const record of overlay.order) record.mode = modeOf(sctx, record);
+  const { order } = overlay;
+
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < order.length; index += 1) {
+    const record = order[index];
+
+    if (record !== undefined) record.mode = modeOf(sctx, record);
+  }
 
   stepDims(sctx, wholes);
   stepRange(sctx, wholes);
 
-  for (const record of overlay.order) {
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < order.length; index += 1) {
+    const record = order[index];
+
+    if (record === undefined) continue;
     if (record.news !== undefined) note(sctx, record, record.news, modeReported(overlay, record));
     record.news = undefined;
   }
@@ -698,6 +765,33 @@ export function drainOverlayEvents(sctx: SyncCtx, monitor: OverlayEventSink): vo
 }
 
 /**
+ * Lets a part go that lost its `HudPart` (F245): a view it still has is put at rest at once, so a walk it was in leaves
+ * no pose on it; its alpha keeps what F240 left it. An entity being despawned may have lost its `Transform` first: its
+ * view, about to be released, only has its pose numbers put at rest, and nothing is drawn on it.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The part that left.
+ */
+function leavePart(sctx: SyncCtx, entity: Entity): void {
+  const state = sctx.ctx.state.sync;
+  const view = state.views.get(entity);
+
+  state.overlay.parts.delete(entity);
+  if (view === undefined) return;
+
+  view.hudWalking = false;
+
+  if (sctx.ctx.deps.world.ecs.get(entity, Transform) !== undefined) {
+    applyHudPose(sctx, entity, view, HUD_REST);
+
+    return;
+  }
+
+  writeHudPose(view, HUD_REST);
+  view.hudTurned = false;
+}
+
+/**
  * Watches the two components of the step: the entities that carry `Overlay` and `HudPart`, the ones there already
  * included.
  *
@@ -715,6 +809,6 @@ export function watchOverlays(sctx: SyncCtx): Array<() => void> {
     ecs.onAdded(Overlay, entity => overlay.entities.add(entity)),
     ecs.onRemoved(Overlay, entity => overlay.entities.delete(entity)),
     ecs.onAdded(HudPart, entity => overlay.parts.add(entity)),
-    ecs.onRemoved(HudPart, entity => overlay.parts.delete(entity))
+    ecs.onRemoved(HudPart, entity => leavePart(sctx, entity))
   ];
 }

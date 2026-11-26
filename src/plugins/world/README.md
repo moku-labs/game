@@ -611,7 +611,10 @@ runs last and in this order: `anim.sample`, which writes the first sample of the
 the frame step (F241); `effects:filters`, which hands the views' filters to Pixi, so an `Alpha` walk's
 first sample is drawn in that frame too; and `renderer.sync`. A system registered after them (the
 ui's `ui.enter`, a feature added later) goes before the tail, so it still writes before the frame is
-drawn, and an enter it starts is drawn at its start in that frame.
+drawn, and an enter it starts is drawn at its start in that frame. And `anim.pose` always runs first
+in phase `sync`: it writes the first sample of the enters the `layout` poses started, so a game
+system of `sync` reads an entering element at its start pose (F241: a gate that switches an
+`Alpha` filter by the alpha read the rest pose and switched the filter off in the first frame).
 
 `"paused"` and `"fast"` skip the phases `input`, `animate` and `layout`; phase `sync`, the reconcile
 slot of `input` and the clear in `signals` run in every mode. A throwing system is reported with
