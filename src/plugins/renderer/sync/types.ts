@@ -2375,6 +2375,11 @@ export type OverlayState = {
   returns: HudReturnRun[];
   /** The runs that ended, taken again by the next leave: a frame makes none after the first. */
   returnPool: HudReturnRun[];
+  /**
+   * The last walk of the poses (F245) ran with no return in progress: every part stands at rest and walks no more, so
+   * the next frame with none walks no pose. True at start, false while a run is in progress.
+   */
+  posesAtRest: boolean;
   /** Scratch of the walk that chooses a run's end when it starts: written in place, cleared at stop. */
   endsWalk: EndsWalk;
 };

@@ -490,17 +490,9 @@ function componentAlpha(sctx: SyncCtx, entity: Entity, view: View): Readonly<Fad
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity of the part.
  * @param view - Its view.
- * @param factors - The factor, 0 to 1, in `factors[0]`: handed over in a cell, since the step of the HUD parts is too
- *   large for V8 to inline this call and a fraction handed to a call it does not inline is boxed (F245, measured).
+ * @param factor - The factor, 0 to 1.
  */
-export function applyHud(
-  sctx: SyncCtx,
-  entity: Entity,
-  view: View,
-  factors: Readonly<Float64Array>
-): void {
-  const factor = factors[0] ?? 1;
-
+export function applyHud(sctx: SyncCtx, entity: Entity, view: View, factor: number): void {
   if (view.hud === factor) return;
 
   markView(sctx, entity);

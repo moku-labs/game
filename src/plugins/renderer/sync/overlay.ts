@@ -584,6 +584,36 @@ function ownedRange(overlay: OverlayState, record: OverlayRecord): ActiveRange |
     : undefined;
 }
 
+/** What the walks of the records and the marked entities read, set before them: no closure per frame. */
+const seeWalk: { sctx: SyncCtx | undefined } = { sctx: undefined };
+
+/**
+ * Marks a record not seen yet in this frame's walk of the marked entities.
+ *
+ * @param record - The record.
+ */
+function unsee(record: OverlayRecord): void {
+  record.seen = false;
+}
+
+/**
+ * Sees one entity that carries `Overlay` in the walk of `stepOverlays`.
+ *
+ * @param entity - The entity.
+ */
+function see(entity: Entity): void {
+  if (seeWalk.sctx !== undefined) seeOverlay(seeWalk.sctx, entity);
+}
+
+/**
+ * Drops a record whose entity was not seen in this frame's walk: its `Overlay` is gone.
+ *
+ * @param record - The record.
+ */
+function dropUnseen(record: OverlayRecord): void {
+  if (!record.seen && seeWalk.sctx !== undefined) dropRecord(seeWalk.sctx, record);
+}
+
 /**
  * Tells whether the overlay step has nothing to do: no marked entity, no HUD part, no record, no range held and no
  * return of the HUD in progress.
@@ -631,17 +661,35 @@ export function stepOverlays(sctx: SyncCtx): void {
   // Before the overlays are seen: a run a leave starts this frame counts from 0.
   if (overlay.returns.length > 0) stepReturns(sctx);
 
-  for (const record of overlay.records.values()) record.seen = false;
-  for (const entity of overlay.entities) seeOverlay(sctx, entity);
-  for (const record of overlay.records.values()) if (!record.seen) dropRecord(sctx, record);
+  // per frame: a Map and a Set walked with `forEach` and callbacks made once, the order by index: a `for…of` V8 does not
+  // fold away builds an iterator of 40 B a walk (measured on the still frame of a sheet that holds the HUD).
+  seeWalk.sctx = sctx;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, no iterator.
+  overlay.records.forEach(unsee);
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
+  overlay.entities.forEach(see);
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Map, no iterator.
+  overlay.records.forEach(dropUnseen);
+  seeWalk.sctx = undefined;
 
   sortOrder(overlay);
-  for (const record of overlay.order) record.mode = modeOf(sctx, record);
+  const { order } = overlay;
+
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < order.length; index += 1) {
+    const record = order[index];
+
+    if (record !== undefined) record.mode = modeOf(sctx, record);
+  }
 
   stepDims(sctx, wholes);
   stepRange(sctx, wholes);
 
-  for (const record of overlay.order) {
+  // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+  for (let index = 0; index < order.length; index += 1) {
+    const record = order[index];
+
+    if (record === undefined) continue;
     if (record.news !== undefined) note(sctx, record, record.news, modeReported(overlay, record));
     record.news = undefined;
   }

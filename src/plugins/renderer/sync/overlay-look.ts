@@ -10,7 +10,7 @@ import type { PixiContainer, PixiModule, PixiRenderLayer, PixiSprite } from "../
 import { layerOf } from "./bounds";
 import { heldWaiting } from "./build";
 import { poseOf, restPose, returnOf } from "./overlay-return";
-import type { OverlayRecord, SyncCtx } from "./types";
+import type { OverlayRecord, OverlayState, SyncCtx } from "./types";
 import { applyHud, applyHudTop, applyHudTurn, writeHudPose } from "./views";
 
 /**
@@ -19,11 +19,8 @@ import { applyHud, applyHudTop, applyHudTurn, writeHudPose } from "./views";
  */
 const POSE = new Float64Array(6);
 
-/** The factor of the part being stepped: the overlays' levels times the returns, multiplied in place (F245). */
+/** The factor of the part being stepped while a return is in progress: the overlays' levels times the returns (F245). */
 const FACTOR = new Float64Array(1);
-
-/** The factor of a part drawn as it is, outside the HUD layer: 1. Never written. */
-const WHOLE: Readonly<Float64Array> = Float64Array.of(1);
 
 /**
  * Makes the dim of one overlay: a sprite of Pixi's white texture, never a view.
@@ -554,6 +551,32 @@ function turnPart(entity: Entity): void {
 }
 
 /**
+ * The walks of the poses (F245), before the step of the parts, so its tap rule reads whether a walk still moves a part.
+ * A frame with no run whose parts the last walk put at rest walks none of them: a frame with no return costs what it
+ * cost before F245.
+ *
+ * @param overlay - The overlay step's state.
+ */
+function stepPoses(overlay: OverlayState): void {
+  const hasRuns = overlay.returns.length > 0;
+
+  if (!hasRuns && overlay.posesAtRest) return;
+
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
+  overlay.parts.forEach(posePart);
+  // A walk with no run put every part at rest and noted none walking: the next one with no run is skipped.
+  overlay.posesAtRest = !hasRuns;
+
+  if (!partsWalk.posed) return;
+
+  partsWalk.posed = false;
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
+  overlay.parts.forEach(drawPart);
+  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
+  overlay.parts.forEach(turnPart);
+}
+
+/**
  * Steps one HUD part of the walk: judged against the HUD layer, faded by the factor of the overlays, and noted in the
  * list of the tops that take no tap when it fades, is going to fade, still walks (F245, as `posePart` noted), or is
  * kept by an inert overlay.
@@ -578,18 +601,23 @@ function stepPart(entity: Entity): void {
     const building = settling || sctx.ctx.deps.world.projection.isBuilding(entity);
 
     if (!building) warnOutside(sctx, entity, key);
-    applyHud(sctx, entity, view, WHOLE);
+    applyHud(sctx, entity, view, 1);
 
     return;
   }
 
-  // The overlays' levels, times every return of the HUD in progress (F240): 1 with none. Kept in a cell and handed
-  // over in it: a fraction crossing a call V8 does not inline is boxed.
-  FACTOR[0] = factorOf(overlay.order, key);
-  if (overlay.returns.length > 0) returnOf(overlay.returns, key, FACTOR);
-  applyHud(sctx, entity, view, FACTOR);
+  // The overlays' levels, times every return of the HUD in progress (F240): 1 with none. The returns multiply into a
+  // cell: a fraction returned by a call V8 does not inline is boxed. With none no cell is read: a read of a
+  // `Float64Array` boxes its number in the cold tiers.
+  let factor = factorOf(overlay.order, key);
 
-  const factor = FACTOR[0] ?? 1;
+  if (overlay.returns.length > 0) {
+    FACTOR[0] = factor;
+    returnOf(overlay.returns, key, FACTOR);
+    factor = FACTOR[0] ?? 1;
+  }
+
+  applyHud(sctx, entity, view, factor);
 
   // Fading, going to fade, still walking, or kept by an inert overlay.
   const takesNoTap =
@@ -629,19 +657,8 @@ export function stepParts(sctx: SyncCtx): void {
   partsWalk.settling = heldWaiting(sctx);
   // per frame: the faded tops written in place into the reused list, the tap set touched only when they change.
   partsWalk.count = 0;
-  // per frame: a Set walked with `forEach` and a callback made once, no iterator and no result objects; the poses
-  // first (F245), so the tap rule reads whether a walk still moves the part.
-  // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
-  overlay.parts.forEach(posePart);
-
-  if (partsWalk.posed) {
-    partsWalk.posed = false;
-    // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
-    overlay.parts.forEach(drawPart);
-    // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
-    overlay.parts.forEach(turnPart);
-  }
-
+  // per frame: a Set walked with `forEach` and a callback made once, no iterator and no result objects.
+  stepPoses(overlay);
   // eslint-disable-next-line unicorn/no-array-for-each, unicorn/no-array-callback-reference -- a Set, no iterator.
   overlay.parts.forEach(stepPart);
 

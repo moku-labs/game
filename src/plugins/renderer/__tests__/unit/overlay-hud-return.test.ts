@@ -1170,6 +1170,22 @@ describe("F245: the walk on the stage", () => {
     expect([topY(stage, energy), topY(stage, gems)]).toEqual([100, 100]);
   });
 
+  // Bug: a move of the part's own Transform writes its top without the walk's offset, and a pose that stands still
+  // (the first key held through the delay) is never drawn again: the part jumps to its rest place mid-walk.
+  it("keeps the walk's offset on a part whose Transform moves while its first key is held", async () => {
+    const { stage, energy } = await returnStage();
+    const ecs = stage.drawn.mock.world.ecs;
+    const splash = shown(stage, { hud: "none", hudReturn: EXAM_IN });
+
+    leaveAndGo(stage, splash);
+    step(stage, 500);
+    expect(topY(stage, energy)).toBe(92);
+
+    ecs.set(energy, Transform, { y: 140 });
+    step(stage, 16);
+    expect(topY(stage, energy)).toBe(132);
+  });
+
   // Bug: the last run's pose wins over the others, or the scale is added instead of multiplied with the part's own.
   it("adds the offsets of two runs that hold a part, and multiplies a scale with the part's own", async () => {
     const { stage, energy } = await returnStage();
