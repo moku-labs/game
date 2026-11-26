@@ -490,9 +490,17 @@ function componentAlpha(sctx: SyncCtx, entity: Entity, view: View): Readonly<Fad
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity of the part.
  * @param view - Its view.
- * @param factor - The factor, 0 to 1.
+ * @param factors - The factor, 0 to 1, in `factors[0]`: handed over in a cell, since the step of the HUD parts is too
+ *   large for V8 to inline this call and a fraction handed to a call it does not inline is boxed (F245, measured).
  */
-export function applyHud(sctx: SyncCtx, entity: Entity, view: View, factor: number): void {
+export function applyHud(
+  sctx: SyncCtx,
+  entity: Entity,
+  view: View,
+  factors: Readonly<Float64Array>
+): void {
+  const factor = factors[0] ?? 1;
+
   if (view.hud === factor) return;
 
   markView(sctx, entity);
@@ -510,6 +518,51 @@ export function applyHud(sctx: SyncCtx, entity: Entity, view: View, factor: numb
 
   if (wrapper !== undefined && wrapper.alpha !== factor) wrapper.alpha = factor;
   if (view.kind === "adapter") writeAdapterAlpha(sctx, entity, view);
+}
+
+/**
+ * Draws a HUD part at the pose of a HUD return's walk (F245): the six numbers of `pose` (`dx`, `dy`, `rotation`, `scale`,
+ * `scaleX`, `scaleY`) compared with the view's, and only when one differs written there and composed onto the part's
+ * top by `applyTransform`, which marks the move. The ECS `Transform` is never written: layout, hit boxes of the game
+ * and snapshots never see the pose. A pose equal to the view's writes nothing.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity of the part.
+ * @param view - Its view.
+ * @param pose - The six numbers, rest `0, 0, 0, 1, 1, 1`.
+ */
+export function applyHudPose(
+  sctx: SyncCtx,
+  entity: Entity,
+  view: View,
+  pose: Readonly<Float64Array>
+): void {
+  // per frame and part: six numbers read by index and compared, nothing written at rest.
+  const dx = pose[0] ?? 0;
+  const dy = pose[1] ?? 0;
+  const rotation = pose[2] ?? 0;
+  const scale = pose[3] ?? 1;
+  const scaleX = pose[4] ?? 1;
+  const scaleY = pose[5] ?? 1;
+
+  if (
+    view.hudDx === dx &&
+    view.hudDy === dy &&
+    view.hudRotation === rotation &&
+    view.hudScale === scale &&
+    view.hudScaleX === scaleX &&
+    view.hudScaleY === scaleY
+  ) {
+    return;
+  }
+
+  view.hudDx = dx;
+  view.hudDy = dy;
+  view.hudRotation = rotation;
+  view.hudScale = scale;
+  view.hudScaleX = scaleX;
+  view.hudScaleY = scaleY;
+  applyTransform(sctx, entity, view);
 }
 
 /**
@@ -1134,7 +1187,8 @@ export function writeVisual(sctx: SyncCtx, entity: Entity, view: View): void {
  * per-axis factor (`scaleX`, `scaleY`, 1 when absent) on each axis. The stretch of the
  * visual (a sized sprite, the 64 x 64 placeholder) is folded into the object's scale, so the
  * pivot is written in the object's own units. A wrapper carries the pose instead, and the visual
- * inside it keeps only its stretch.
+ * inside it keeps only its stretch. The pose of a HUD return's walk (F245, the view's `hud*` numbers) is composed on
+ * top: its offsets add to the position and the rotation, its factors multiply the scale; at rest they change nothing.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -1149,12 +1203,12 @@ export function applyTransform(sctx: SyncCtx, entity: Entity, view: View): void 
   // leaves the multiplication out, boxes a fractional product (one allocation per view per pass).
   const factorX = "scaleX" in value ? (value.scaleX ?? 1) : 1;
   const factorY = "scaleY" in value ? (value.scaleY ?? 1) : 1;
-  const scaleX = value.scale * factorX;
-  const scaleY = value.scale * factorY;
+  const scaleX = value.scale * factorX * view.hudScale * view.hudScaleX;
+  const scaleY = value.scale * factorY * view.hudScale * view.hudScaleY;
 
   // The top's own pose moves the view: a kept picture follows it (P9.4). Writes inside a wrapper change the picture.
-  writePoint(sctx, entity, target.position, value.x, value.y, markMoved);
-  writeRotation(sctx, entity, target, value.rotation, markMoved);
+  writePoint(sctx, entity, target.position, value.x + view.hudDx, value.y + view.hudDy, markMoved);
+  writeRotation(sctx, entity, target, value.rotation + view.hudRotation, markMoved);
 
   if (view.wrapper === undefined) {
     writePoint(sctx, entity, target.scale, scaleX * stretch.x, scaleY * stretch.y, markMoved);
@@ -1497,6 +1551,12 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
     hiddenSelf: 0,
     hiddenTop: 0,
     hud: 1,
+    hudDx: 0,
+    hudDy: 0,
+    hudRotation: 0,
+    hudScale: 1,
+    hudScaleX: 1,
+    hudScaleY: 1,
     held: false
   };
 

@@ -68,4 +68,20 @@ describe("the overlay step with a HUD return", () => {
 
     expect(bytesPerCall(step, 20_000)).toBeLessThanOrEqual(BUDGET.hudReturnIdle + NOISE);
   });
+
+  // F245. Bug: an eased factor or a sampled pose boxes a double (a curve called with a number and returning one, a
+  // field read through a returned value), or the pose is handed over as a new object per part.
+  it("steps a run with a curve, a tuple in parts and a three-key walk, three poses drawn, without allocating", async () => {
+    const { step } = await returnBoard("walking");
+
+    expect(bytesPerCall(step, 20_000)).toBeLessThanOrEqual(BUDGET.hudReturnWalking + NOISE);
+  });
+
+  // F245. Bug: the compare of an equal new value misses the curves or the keys and copies again: a bezier table solved
+  // and the keys flattened at every render of an inline literal.
+  it("steps an overlay whose motion value is written again as an equal new object every frame without allocating", async () => {
+    const { step } = await returnBoard("walkRewritten");
+
+    expect(bytesPerCall(step, 20_000)).toBeLessThanOrEqual(BUDGET.hudReturnWalkRewritten + NOISE);
+  });
 });

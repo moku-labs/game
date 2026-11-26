@@ -69,6 +69,12 @@ export function viewOf(object: PixiContainer): View {
     hiddenSelf: 0,
     hiddenTop: 0,
     hud: 1,
+    hudDx: 0,
+    hudDy: 0,
+    hudRotation: 0,
+    hudScale: 1,
+    hudScaleX: 1,
+    hudScaleY: 1,
     held: false
   };
 }

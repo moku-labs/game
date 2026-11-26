@@ -9,9 +9,21 @@ import type { DemandReason } from "../demand/types";
 import type { PixiContainer, PixiModule, PixiRenderLayer, PixiSprite } from "../types";
 import { layerOf } from "./bounds";
 import { heldWaiting } from "./build";
-import { returnOf } from "./overlay-return";
+import { HUD_REST, poseOf, restPose, returnOf } from "./overlay-return";
 import type { OverlayRecord, SyncCtx } from "./types";
-import { applyHud } from "./views";
+import { applyHud, applyHudPose } from "./views";
+
+/**
+ * The pose of the part being stepped (F245): the walks of the runs that hold it, sampled into it in place, one part at a
+ * time; never allocated in a frame.
+ */
+const POSE = new Float64Array(6);
+
+/** The factor of the part being stepped: the overlays' levels times the returns, multiplied in place (F245). */
+const FACTOR = new Float64Array(1);
+
+/** The factor of a part drawn as it is, outside the HUD layer: 1. Never written. */
+const WHOLE: Readonly<Float64Array> = Float64Array.of(1);
 
 /**
  * Makes the dim of one overlay: a sprite of Pixi's white texture, never a view.
@@ -476,8 +488,9 @@ const partsWalk: {
 } = { sctx: undefined, hud: undefined, settling: false, count: 0 };
 
 /**
- * Steps one HUD part of the walk: judged against the HUD layer, faded by the factor of the overlays, and noted in the
- * list of the tops that take no tap when it fades, is going to fade, or is kept by an inert overlay.
+ * Steps one HUD part of the walk: judged against the HUD layer, faded by the factor of the overlays, posed by the walks
+ * of the returns that hold it (F245, rest with none), and noted in the list of the tops that take no tap when it fades,
+ * is going to fade, still walks, or is kept by an inert overlay.
  *
  * @param entity - The part.
  */
@@ -499,19 +512,33 @@ function stepPart(entity: Entity): void {
     const building = settling || sctx.ctx.deps.world.projection.isBuilding(entity);
 
     if (!building) warnOutside(sctx, entity, key);
-    applyHud(sctx, entity, view, 1);
+    applyHud(sctx, entity, view, WHOLE);
+    // Drawn as it is: a walk it was in leaves no pose on it.
+    applyHudPose(sctx, entity, view, HUD_REST);
 
     return;
   }
 
-  // The overlays' levels, times every return of the HUD in progress (F240): 1 with none.
-  const levels = factorOf(overlay.order, key);
-  const factor = overlay.returns.length === 0 ? levels : levels * returnOf(overlay.returns, key);
+  // The overlays' levels, times every return of the HUD in progress (F240): 1 with none. Kept in a cell and handed
+  // over in it: this step is too large for V8 to inline every callee, and a fraction crossing a call is boxed.
+  const hasRuns = overlay.returns.length > 0;
 
-  applyHud(sctx, entity, view, factor);
+  FACTOR[0] = factorOf(overlay.order, key);
+  if (hasRuns) returnOf(overlay.returns, key, FACTOR);
+  applyHud(sctx, entity, view, FACTOR);
 
-  // Fading, going to fade, or kept by an inert overlay.
-  const takesNoTap = factor < 1 || targetOf(overlay.order, key) < 1 || inertOf(overlay.order, key);
+  const factor = FACTOR[0] ?? 1;
+
+  // The walks of the runs that hold it (F245): rest with no run, a compare of six numbers once it stands there.
+  restPose(POSE);
+
+  const isWalking = hasRuns && poseOf(overlay.returns, key, POSE);
+
+  applyHudPose(sctx, entity, view, POSE);
+
+  // Fading, going to fade, still walking, or kept by an inert overlay.
+  const takesNoTap =
+    factor < 1 || isWalking || targetOf(overlay.order, key) < 1 || inertOf(overlay.order, key);
 
   if (takesNoTap) {
     const top = view.wrapper ?? view.object;
@@ -524,8 +551,8 @@ function stepPart(entity: Entity): void {
 
 /**
  * The HUD parts: every part of the HUD layer is drawn with the factor of the overlays' levels of this frame times the
- * returns in progress (F240), and the parts leaving or not fully back take no tap, and the parts an inert overlay keeps
- * shown take no tap either. A part outside the HUD layer is warned once and drawn as it is. A part of a scene built
+ * returns in progress (F240) and at the pose of their walks (F245), and the parts leaving, not fully back or still
+ * walking take no tap, and the parts an inert overlay keeps shown take no tap either. A part outside the HUD layer is warned once and drawn as it is. A part of a scene built
  * aside is not warned while it builds, nor in the frame its build waits to be attached: the layers it is judged against
  * are still the scene's being left (a splash with no HUD layer), or none on a cold page (F117).
  *

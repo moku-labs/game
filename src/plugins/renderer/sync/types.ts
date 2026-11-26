@@ -191,6 +191,16 @@ export type View = {
   /** The HUD factor an overlay fades this view with (a `HudPart`), 1 for every other view (spec 22 O7). */
   hud: number;
   /**
+   * The pose a HUD return's walk draws this view with (F245), composed onto its top after its `Transform`: offsets in
+   * reference units and radians that add (rest 0), factors that multiply (rest 1). Never written into the ECS.
+   */
+  hudDx: number;
+  hudDy: number;
+  hudRotation: number;
+  hudScale: number;
+  hudScaleX: number;
+  hudScaleY: number;
+  /**
    * A held top of a scene build (spec 31) or of a warm window (spec 33, slice B+D): a view of the next scene, or of a
    * closed window, with no parent or with a live parent, built while the current scene stays drawn. It hangs nowhere
    * in the stage, is listed in `SyncState.heldViews`, and is attached in the pass after the commit or the open.
@@ -2131,12 +2141,56 @@ export type OverlayReport = {
 export type ClampedHudReturn = {
   readonly delayMs: number;
   readonly fadeMs: number;
+  /** The curve of the fade and the walk (F245); linear when `undefined`. */
+  readonly curve: ClampedCurve;
+  /** The walk of the parts (F245); `undefined` without keys or with keys that cannot be read. */
+  readonly keys: ClampedKeys | undefined;
   /** The keys with their own times; `undefined` without `parts`. */
   readonly parts: ReadonlyMap<string, ClampedReturnPart> | undefined;
+  /** A curve of the value (its own, a part's or a key's) could not be read and is linear. */
+  readonly badEase: boolean;
+  /** Keys of the value (its own or a part's) could not be read: that walk is left out. */
+  readonly badKeys: boolean;
+  /** The key of `parts` the first unreadable curve is in; `undefined` for the overlay's own, or with none. */
+  readonly badEasePart: string | undefined;
+  /** The key of `parts` the first unreadable keys are in; `undefined` for the overlay's own, or with none. */
+  readonly badKeysPart: string | undefined;
 };
 
-/** The times of one key of a clamped `hudReturn`, both filled in from the overlay's when not given. */
-export type ClampedReturnPart = { readonly delayMs: number; readonly fadeMs: number };
+/**
+ * The times, the curve and the keys of one key of a clamped `hudReturn`, each filled in from the overlay's when not
+ * given.
+ */
+export type ClampedReturnPart = {
+  readonly delayMs: number;
+  readonly fadeMs: number;
+  readonly curve: ClampedCurve;
+  readonly keys: ClampedKeys | undefined;
+};
+
+/**
+ * A curve of a clamped `hudReturn` (F245): a named curve of `world`, eased in a cell, or a cubic-bezier solved once with
+ * its four numbers kept; `undefined` is linear. Private to the renderer.
+ */
+export type ClampedCurve =
+  | { readonly name: Exclude<Ease, (t: number) => number> }
+  | {
+      readonly bezier: (t: number) => number;
+      readonly points: readonly [number, number, number, number];
+    }
+  | undefined;
+
+/**
+ * The keys of a return's walk (F245), flattened once when the value changes: `count` keys of `KEY_STRIDE` numbers each
+ * in `data` (`at`, `dx`, `dy`, `rotation`, `scale`, `scaleX`, `scaleY`; NaN for a field the key does not name), and the
+ * curve of the segment that ends on each key (`undefined`: the return's curve). Read by index, never allocated in a
+ * frame. Private to the renderer.
+ */
+export type ClampedKeys = {
+  readonly count: number;
+  readonly data: Float64Array;
+  readonly curves: readonly ClampedCurve[];
+};
 
 /**
  * One return of the HUD parts in progress (F240): whose leave started it, the game time counted since, the clamped

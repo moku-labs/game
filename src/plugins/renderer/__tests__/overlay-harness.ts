@@ -7,10 +7,12 @@
  */
 import * as pixi from "pixi.js";
 import { vi } from "vitest";
+import { cubicBezier } from "../../anim/tween/bezier";
 import { Exiting, Layer, Order } from "../../world/ecs/define";
+import { applyEase } from "../../world/projection/easing";
 import type { AnyComponentValue, Entity, LayerSpec } from "../../world/types";
 import { Overlay, OverlayLevel, type OverlayValue, Parent, Shape, Transform } from "../components";
-import type { HudReturnRun } from "../sync/types";
+import type { ClampedCurve, HudReturnRun } from "../sync/types";
 import type { Config, PixiContainer } from "../types";
 import { type Drawn, startDrawn } from "./demand-harness";
 import { type OverlayOracle, watchOverlays } from "./overlay-oracle";
@@ -69,9 +71,33 @@ export type OverlayStage = {
   mark(): number;
 };
 
+/** The curves of the tuples the oracle met, each solved once from its own four numbers (F245). */
+const bezierOf = new WeakMap<object, (t: number) => number>();
+
+/**
+ * A run's curve at a time, from its own numbers and not from the step's evaluation: a name through `world`'s
+ * `applyEase`, a tuple through a curve the oracle solves itself from the four numbers; linear without one (F245).
+ *
+ * @param curve - The clamped curve.
+ * @param t - The share of the fade, 0 to 1.
+ * @returns The eased share.
+ */
+function eased(curve: ClampedCurve, t: number): number {
+  if (curve === undefined) return t;
+  if ("name" in curve) return applyEase(curve.name, t);
+
+  const known = bezierOf.get(curve.points);
+  const solved = known ?? cubicBezier(...curve.points);
+
+  if (known === undefined) bezierOf.set(curve.points, solved);
+
+  return solved(t);
+}
+
 /**
  * The factor the returns in progress give a HUD key (F240), from their own numbers, written here and not imported from
- * the step: 0 before the delay, linear over the fade, 1 after, for the keys a run holds; the runs multiply.
+ * the step: 0 before the delay, on the run's curve over the fade (linear without one, F245) kept within 0..1, 1 after,
+ * for the keys a run holds; the runs multiply.
  *
  * @param returns - The runs in progress.
  * @param key - The part's key.
@@ -86,9 +112,12 @@ function expectedReturn(returns: readonly HudReturnRun[], key: string): number {
     const part = run.value.parts?.get(key);
     const delay = part?.delayMs ?? run.value.delayMs;
     const fade = run.reduced ? 0 : (part?.fadeMs ?? run.value.fadeMs);
+    const curve = part === undefined ? run.value.curve : part.curve;
 
     if (run.elapsed < delay) factor = 0;
-    else if (fade > 0) factor *= Math.min(1, (run.elapsed - delay) / fade);
+    else if (fade > 0) {
+      factor *= Math.min(1, Math.max(0, eased(curve, Math.min(1, (run.elapsed - delay) / fade))));
+    }
   }
 
   return factor;

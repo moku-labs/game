@@ -303,8 +303,10 @@ export {
   Transform
 } from "./plugins/renderer/components";
 export type {
+  HudEase,
   HudPartValue,
   HudReturn,
+  HudReturnKey,
   OverlayValue,
   SourceScale,
   SpriteBlend
