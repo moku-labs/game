@@ -32,7 +32,9 @@ const config: Config = {
   poolTrim: { restMs: 1000, aboveMb: 16 },
   preference: "webgpu",
   aspect: { min: 4 / 3, max: 21 / 9 },
-  poolLimit: 256,
+  // Objects and wrappers together. A closed window gives its views back here and the next one takes them (2в); the
+  // album alone kept 599 on the A26. About 1.2 KB of JS heap each, measured there: about 1.2 MB when full.
+  poolLimit: 1024,
   unsupportedMessage: "This device cannot run the game.",
   loadPixi: () => import("pixi.js"),
   debug: { nineSlice: false, verifyFrames: false, kept: true, overdraw: false },

@@ -303,6 +303,8 @@ export const BUDGET = {
   // F187: new. `afterFrame` of a drawn frame while a trim holds a target a bind group still binds: one listener count
   // a held target, nothing made.
   poolHeldFrame: 0,
+  // 2в: new. A wrapper of a parent view through the pool: reset in place, stored, taken back; no container made.
+  wrapperPoolTrip: 0,
   // F194: new. The release of a source from a bind group that still binds a live texture: its slots swapped in place.
   releaseBindLive: 0,
   // F194: new. The release of a group's last texture: its slots swapped, its listeners compacted out of EMPTY's lists

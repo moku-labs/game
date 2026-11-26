@@ -229,7 +229,7 @@ export type KeptInternal = {
   slots(entity: Entity, slots: readonly FilterSlot[]): void;
   /** Where the filters of a view hang now: the stand-in while kept, its top otherwise. */
   filterTarget(view: View): PixiContainer;
-  /** The view is leaving: its record goes at once. */
+  /** The view is leaving: its record goes at once, and its Source, if any, lets its top go. */
   forget(entity: Entity): void;
   /** Turns this decision's marks into dirty flags, before the decision clears them. */
   collect(): void;

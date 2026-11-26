@@ -436,9 +436,11 @@ function createFakeRenderer(io: FakeIo): FakeRenderer {
           fake.invalidated.push([...keys]);
         },
         upload: (textures: readonly Texture[]): Promise<boolean> => fake.upload(textures),
+        // By index, as the real one: an alloc test of a caller measures the caller, not an iterator.
         used: (keys: readonly string[]): boolean => {
-          for (const key of keys) {
-            if (fake.drawn.has(key)) return true;
+          // eslint-disable-next-line unicorn/no-for-loop -- the indexed walk allocates nothing.
+          for (let index = 0; index < keys.length; index += 1) {
+            if (fake.drawn.has(keys[index] as string)) return true;
           }
 
           return false;
