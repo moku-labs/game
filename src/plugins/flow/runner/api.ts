@@ -10,6 +10,7 @@ import { restorePosition, runLoop } from "./loop";
 import { framePath, graphHash } from "./registry";
 import type {
   Bookmark,
+  EdgeTiming,
   EnterCallback,
   FlowGraph,
   FlowState,
@@ -264,7 +265,11 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
       modules.fx.setMode(mode);
       // The guide of the node that stands was not shown in fast mode: live shows it, once.
       if (previous === "fast" && mode === "live") state.guide?.reshow();
-    }
+    },
+
+    // Inline and positive: a release bundle answers `undefined` and keeps no ring.
+    edgeTimes: (): Readonly<EdgeTiming> | undefined =>
+      typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ ? state.timing : undefined
   };
 }
 

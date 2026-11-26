@@ -9,6 +9,7 @@ import type { OpenEffect, RecoveryOutcome, Safe, Step, StepOutcome } from "./loo
 import { noPayload } from "./loop-types";
 import { abortOutcome, abortReason, closePopups, nodeFx, stopped } from "./node";
 import { notifyGateOpen } from "./seam";
+import { clearNode } from "./timing";
 import type { AnyNode, AnyRecoverContext, Modules } from "./types";
 
 /** One recovery in progress: a node run that has no input. */
@@ -93,6 +94,11 @@ async function callRecover(modules: Modules, recovery: Recovery): Promise<Recove
  * @param recovery - The recovery whose `recover` returned.
  */
 function commitRecovery(ctx: FlowCtx, modules: Modules, recovery: Recovery): void {
+  // The recovery edge has neither a body nor a stay, and the failed node before it left its numbers.
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    clearNode(ctx.state.runner.timing);
+  }
+
   commitEdge(
     ctx,
     modules,

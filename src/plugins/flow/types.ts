@@ -328,6 +328,7 @@ export type {
   CheckedEdges,
   DefineNode,
   Edges,
+  EdgeTiming,
   EnterCallback,
   Exit,
   FlowDefinition,

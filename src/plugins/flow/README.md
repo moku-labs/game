@@ -34,6 +34,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `state(): FlowState` | `{ running, path, stack, pending, mode }`, frozen. The same object comes back while the graph did not move: no edge, no gate opened or closed, no mode switch. |
 | `history(): readonly JournalEntry[]` | Edges since the last checkpoint. |
 | `setMode(mode): void` | `"live"` or `"fast"`. Legal before `run()` and while the loop rests. It throws while a transit node waits at the gate, also right after a `restore` into one. |
+| `edgeTimes(): Readonly<EdgeTiming> \| undefined` | Agent builds (dev pages and `--debug` builds) with `time.agentClock()`: the ring of the last 256 edges and the page-clock milliseconds of each part. `undefined` in a release build. The renderer's monitor drains it every frame. See [The edge timer](#the-edge-timer). |
 | `gate.answer(answer): boolean` | The one entry of player answers. The gate closes before the answer is handed on, so a double tap hits a closed door. An answer to a closed gate is refused and held for the next gate. See [The gate hold](#the-gate-hold). |
 | `gate.pointer(active): void` | While true, entering an `over` node waits: a popup never appears mid-drag. |
 | `gate.state()` | `{ open, allowed, narrowed, blocked? }`. `blocked` is there while a `guide` names the answer of a press outside its window: `input` answers it. |
@@ -733,13 +734,37 @@ No engine plugin hooks these events in V1. They are for the game, for projection
 Rare notifications for the plugins above — preload, editor, analytics. None expects an answer: the
 loop itself never uses the event bus.
 
+## The edge timer
+
+An agent build (`__MOKU_GAME_AGENT__`, set by `moku-game dev` and `moku-game build --debug`) times every edge on the
+page clock of `time.agentClock()`. `flow.edgeTimes()` answers the ring of the last 256 edges, `Flow.EdgeTiming`: the
+edge of index `i`, counted from 0 since the app started, sits in slot `i % capacity`, and `written` counts every edge
+timed. It is a live view, the same object every call and never reset by a stop: read it, never write it, and copy
+what is kept past the frame.
+
+| Column | Per edge |
+|---|---|
+| `node`, `outcome`, `next` | The path of the node that took the edge, the outcome and the path it leads to. |
+| `at` | The page clock at the start of the edge. |
+| `ms` | The whole edge: the commit, the journal and the `flow:edge` emit. |
+| `commitMs` | `transaction.commit()`, with the `model:committed` listener that runs inside it. |
+| `hooksMs` | The `flow:edge` emit, with the listener that runs inside it. The bus awaits each listener, so only the first one and its part up to its first `await` run inside the emit. |
+| `bodyMs` | The node body's first synchronous slice: from the call to its first `await`, the whole body for one that awaits nothing. NaN when no body ran: a node without `run`, a slot's edge, a substituted sub-flow, the recovery edge of the safe node, and the edge of a world event that ended a rest node. |
+| `wallMs` | From the node's entry (before its `onEnter` stages) to the start of its edge: stages, body and the wait at the gate. NaN for an edge no node entry led to: a slot's edge, a substituted sub-flow, the recovery edge. |
+
+The timer allocates nothing per edge: a clock read stays in a local or goes into a typed array, and the strings are
+stored by reference. Every measurement point sits inside the inline guard
+`typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__`, so a release bundle folds it away and drops
+`runner/timing.ts`; `edgeTimes()` answers `undefined` there.
+
 ## Lifecycle
 
 - **onInit** `connectFlow` posts `clock.onElapsed` into the inbox, flushes effect completions and
   ages the gate hold in `time.onFrame("signals")`, with the frame and the elapsed game time of
   that frame, and registers the `schedule` effect handler with `{ runInFast: true }`. `onInit` has no access to the plugin's own API, so it builds its own
   module objects over `ctx.state` — the modules keep their data there, so it is the same gate and
-  the same fx the API uses.
+  the same fx the API uses. In an agent build with `time.agentClock()` it starts the edge timer of
+  `edgeTimes()`.
 - **hooks** `lifecycle:changed`: `resumed` pokes the clock; a `"background"` push starts
   `model.store.flush()` and keeps its promise in `state.runner.flushing` for `onStop`.
   `model:committed`: while a node with a `guide` waits at its open gate, a commit that is no edge
@@ -755,9 +780,10 @@ loop itself never uses the event bus.
 
 ## Dependencies
 
-`time` for the `signals` phase, `isRunning()`, the `elapsed` the gate hold is aged with, and
+`time` for the `signals` phase, `isRunning()`, the `elapsed` the gate hold is aged with,
 `wake()` on every edge (an edge is the moment the
-screen has something new to show, so the idle cap is lifted for it), `lifecycle` for the hook,
+screen has something new to show, so the idle cap is lifted for it) and, in an agent build,
+`agentClock()` at init, the page clock of the edge timer, `lifecycle` for the hook,
 `model` for the store and the `model:committed` hook that derives a node's guide again, `clock` for
 `now`, `onElapsed`, `poke` and the `schedule` effect. A node
 never touches the clock: it writes `await fx(schedule(rules.nextDue(player, tables)))`.

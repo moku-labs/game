@@ -10,6 +10,7 @@ import { planFrom } from "./plan";
 import { safeFrames } from "./position";
 import { framePath } from "./registry";
 import { notifyRest } from "./seam";
+import { recordEdge, stampEdge } from "./timing";
 import type { Frame, JournalEntry, Modules, Result } from "./types";
 
 /**
@@ -29,7 +30,8 @@ export function asError(value: unknown): Error {
 /**
  * Commits the transaction of one node, releases its hints, journals the edge and emits
  * `flow:edge`. This is the only commit of the engine: the edge of a node, and the recovery edge
- * of the safe node, both go through it. It counts the edge among those since the last rest node.
+ * of the safe node, both go through it. It counts the edge among those since the last rest node. In an agent build it
+ * writes the edge's times into the ring of `edgeTimes()`.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
@@ -43,7 +45,17 @@ export function commitEdge(
   step: Commit,
   next: string
 ): JournalEntry {
+  // An agent build times the edge. Inline and positive, as world's system timing: Bun folds every guard of this
+  // function under a production `define`, so a release bundle times nothing and drops `timing.ts`.
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    stampEdge(ctx.state.runner.timing, 0);
+  }
+
   const commit = step.transaction.commit();
+
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    stampEdge(ctx.state.runner.timing, 1);
+  }
 
   ctx.state.runner.restless += 1;
 
@@ -63,6 +75,10 @@ export function commitEdge(
     ctx.config.journalLimit
   );
 
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    stampEdge(ctx.state.runner.timing, 2);
+  }
+
   ctx.emit("flow:edge", {
     flow: step.location.flow.id,
     node: step.location.name,
@@ -73,6 +89,10 @@ export function commitEdge(
     index: entry.index,
     now: step.now
   });
+
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    recordEdge(ctx.state.runner.timing, step.path, step.result.outcome, next);
+  }
 
   return entry;
 }
