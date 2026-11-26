@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * @file The phone run of the stress bench: `bun bench/stress/a26.ts <serial> [--out dir] [--seconds 12]
- * [--scenes a,b] [--profile]`. It reads `adb forward --list`, `adb reverse --list` and the window in front and
+ * [--scenes a,b] [--profile] [--front app]`. It reads `adb forward --list`, `adb reverse --list` and the window in front and
  * refuses a phone that is taken, having touched nothing. Then it serves `bench/stress/dist/web` (build it first),
  * brings the port to the phone, opens the page in the phone's Chrome, measures each scene over the DevTools port,
  * wakes the screen every two minutes, and gives back only the two ports it took. Port 9333 is never used.
@@ -26,7 +26,9 @@ const { values, positionals } = parseArgs({
     seconds: { type: "string", default: "12" },
     scenes: { type: "string" },
     profile: { type: "boolean", default: false },
-    adb: { type: "string", default: "adb" }
+    adb: { type: "string", default: "adb" },
+    // An app the holder of the phone allowed in front: the page opens over it, the app is left running.
+    front: { type: "string" }
   }
 });
 const [serial] = positionals;
@@ -64,8 +66,10 @@ const verdict = phoneVerdict({
   focus: focusOf(await adb("shell", "dumpsys", "window"))
 });
 
-if (!verdict.free) {
-  console.error(`The phone is taken, nothing was touched.\n  ${verdict.reasons.join("\n  ")}`);
+const reasons = verdict.reasons.filter(reason => reason !== `${values.front} is in front.`);
+
+if (reasons.length > 0) {
+  console.error(`The phone is taken, nothing was touched.\n  ${reasons.join("\n  ")}`);
   process.exit(1);
 }
 
@@ -81,7 +85,8 @@ await adb("forward", `tcp:${CDP_PORT}`, "localabstract:chrome_devtools_remote");
 
 try {
   const summary: Record<string, unknown> = {};
-  let visit = 0;
+  // A number no tab left by an earlier run carries.
+  let visit = Date.now() % 1_000_000_000;
 
   for (const scene of scenes) {
     visit += 1;
@@ -116,6 +121,7 @@ try {
       out: values.out,
       seconds: Number(values.seconds),
       profile: values.profile,
+      tracer: browser,
       tick: async () => {
         // The GPU clock and load of this moment, for the reading of the GPU times.
         const clock = await adb("shell", "cat /sys/kernel/gpu/gpu_clock /sys/kernel/gpu/gpu_busy");
@@ -128,6 +134,7 @@ try {
         await adb("shell", "input", "keyevent", "KEYCODE_WAKEUP");
       }
     });
+    await page.close().catch(() => undefined);
     await browser.close();
   }
 
