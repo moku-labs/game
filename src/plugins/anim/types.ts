@@ -440,6 +440,13 @@ export type State = {
   overMaxTracks: boolean;
   /** The animations already warned for a looping `frames` step that blocks the rest of a `sequence` (dev). */
   warnedLoops: Set<string>;
+  /** The records of the tracks the frame step dropped, by slot count, kept for the next start (F244 В, `tween/pool.ts`). */
+  freeTracks: Track[][];
+  /**
+   * `[0]`: the bases let go and kept absent in their table; `[1]`: the owner entries at id 0. The frame step drops
+   * them once either reaches 512 (`tween/cells.ts`).
+   */
+  absent: Int32Array;
   /** The live reduced-motion switch. The frozen `Config.reducedMotion` only seeds it. */
   reducedMotion: boolean;
   /** Remover of `world.projection.setDriver`. */

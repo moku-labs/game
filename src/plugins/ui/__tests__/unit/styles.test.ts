@@ -120,6 +120,44 @@ describe("useViewport: the viewport of a frame", () => {
   });
 });
 
+describe("resolveElement: the resolution kept per style object (F244 В)", () => {
+  /** The state flags of an element no pointer touches. */
+  const IDLE = noFlags();
+
+  it("hands out the kept resolution for the same style, flags and viewport, and resolves again for other flags", () => {
+    // Bug caught: a kept resolution handed out after the element was pressed, so the press shows nothing.
+    const { styles } = stylesModule();
+    const style = defineStyle({ gap: 8, is: { pressed: { gap: 4 } } });
+
+    styles.useViewport(viewportOf());
+
+    const first = styles.resolveElement(style, IDLE);
+
+    expect(styles.resolveElement(style, IDLE)).toBe(first);
+    expect(styles.resolveElement(style, { ...IDLE, pressed: true }).gap).toBe(4);
+    expect(styles.resolveElement(style, IDLE).gap).toBe(8);
+  });
+
+  it("resolves a kept style again when the viewport changes its safe area or its size", () => {
+    // Bug caught: a style kept across a new viewport keeps the old safe-area inset or the old `when` variant.
+    const { styles } = stylesModule();
+    const style = defineStyle({
+      top: "safeArea.top",
+      gap: 8,
+      when: { landscape: { gap: 16 } }
+    });
+
+    styles.useViewport(viewportOf());
+    expect(styles.resolveElement(style, IDLE).top).toBe(0);
+
+    styles.useViewport(viewportOf({ safeArea: { top: 44, right: 0, bottom: 0, left: 0 } }));
+    expect(styles.resolveElement(style, IDLE).top).toBe(44);
+
+    styles.useViewport(viewportOf({ width: 1920, height: 1080, orientation: "landscape" }));
+    expect(styles.resolveElement(style, IDLE).gap).toBe(16);
+  });
+});
+
 // ─── resolve ──────────────────────────────────────────────────
 
 describe("resolve", () => {

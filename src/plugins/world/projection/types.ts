@@ -883,6 +883,12 @@ export type ProjectionState = {
    * entry of an entity that is gone is dropped by the sweep and by the converge step.
    */
   rests: Map<Entity, RestPose>;
+  /** The track records the sweep dropped once their track ended, kept for the next start (F244 В, `driver.ts`). */
+  freeTracks: Track[];
+  /** The handle `viewOf` keeps per element, with the view record it plays on, while its pose and key stand. */
+  elementHandles: Map<Entity, { view: View; handle: ViewHandle<unknown> }>;
+  /** The patch of the fields that are no number a `toRest` writes, kept per component name with its fields. */
+  othersPatches: Map<string, { names: string[]; patch: Record<string, unknown> }>;
   /** Projection name to key to the entity a plugin above registered under it. */
   keys: Map<string, Map<string, Entity>>;
   /**

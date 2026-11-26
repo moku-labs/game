@@ -460,4 +460,6 @@ export function stopAnim(state: State): void {
   state.markListeners.clear();
   state.overMaxTracks = false;
   state.bornFrom = 0;
+  state.freeTracks.length = 0;
+  state.absent.fill(0);
 }

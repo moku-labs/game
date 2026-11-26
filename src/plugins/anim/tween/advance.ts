@@ -10,10 +10,22 @@ import type { AnyComponent } from "../../world/ecs/types";
 import { easeCell } from "../../world/projection/easing";
 import type { Entity, TrackOptions, TrackSegment } from "../../world/types";
 import { Animation, countPlaying } from "../components";
-import { dropEnded } from "../dense";
 import type { AnimCtx } from "../types";
-import { baseOr, cellValue, setBase, setOffset, sumOffsets } from "./cells";
-import { type SlotCells, slotCellsOf } from "./slots";
+import {
+  baseOf,
+  baseOr,
+  cellValue,
+  claimOwner,
+  deleteBase,
+  ownerOf,
+  pruneAbsent,
+  releaseOwner,
+  setBase,
+  setOffset,
+  sumOffsets
+} from "./cells";
+import { keyFor, releaseCell, releaseTrack, takeTrack } from "./pool";
+import { slotCellsOf } from "./slots";
 import type { StepMotion, Track } from "./types";
 
 /**
@@ -29,42 +41,7 @@ import type { StepMotion, Track } from "./types";
  * ```
  */
 export function fieldKey(entity: Entity, component: string, field: string): string {
-  return `${entity}:${component}:${field}`;
-}
-
-/**
- * The key of every field of a new track, built once so a frame writes without building strings.
- *
- * @param entity - The entity.
- * @param component - Component name.
- * @param fields - The target fields of the track.
- * @returns The key per field.
- * @example
- * ```ts
- * keysOf(1_048_576, "Transform", { x: 10 }); // { x: "1048576:Transform:x" }
- * ```
- */
-function keysOf(
-  entity: Entity,
-  component: string,
-  fields: Record<string, number>
-): Record<string, string> {
-  const keys: Record<string, string> = {};
-
-  for (const field of Object.keys(fields)) keys[field] = fieldKey(entity, component, field);
-
-  return keys;
-}
-
-/**
- * The key a track books one of its fields under: the one `startTrack` built.
- *
- * @param track - The track.
- * @param field - One of its fields.
- * @returns The key of the owner, bases and offsets tables.
- */
-function keyOf(track: Track, field: string): string {
-  return track.keys[field] ?? fieldKey(track.entity, track.component.componentName, field);
+  return keyFor(entity, component, field);
 }
 
 /**
@@ -94,7 +71,12 @@ export function addedOffsets(
   for (const track of actx.state.additive.get(entity) ?? []) {
     if (track.component.componentName !== component.componentName) continue;
 
-    for (const field of Object.keys(track.to)) sums[field] = sumOffsets(actx, keyOf(track, field));
+    for (let slot = 0; slot < track.names.length; slot++) {
+      const field = track.names[slot];
+      const key = track.slotKeys[slot];
+
+      if (field !== undefined && key !== undefined) sums[field] = sumOffsets(actx, key);
+    }
   }
 
   return sums;
@@ -147,7 +129,7 @@ function beginTrack(actx: AnimCtx, track: Track, stored: Readonly<Record<string,
 
     if (track.live[slot] === 0 || field === undefined || key === undefined) continue;
 
-    const base = actx.state.bases.get(key);
+    const base = baseOf(actx, key);
     const current = stored[field];
     // A field the value lacks starts from its neutral (`scaleX` is 1), else from the target: no jump.
     const read =
@@ -429,7 +411,6 @@ function writeFields(actx: AnimCtx, track: Track, final: boolean): void {
   // per frame: the slots of the track, its value cells and its own patch, all made when it
   // started; the numbers pass between the steps in `values`, so nothing new is made.
   const { names, live, moved, values, seen } = track;
-  let fields = 0;
   let count = 0;
 
   // eslint-disable-next-line unicorn/no-for-loop -- the slot indexes four arrays of the track
@@ -439,7 +420,6 @@ function writeFields(actx: AnimCtx, track: Track, final: boolean): void {
     moved[slot] = 0;
     if (live[slot] === 0 || field === undefined) continue;
 
-    fields++;
     if (skipsOwned(track, owned, field)) {
       // Another writer holds the field: what it holds is unknown again until it is read.
       seen[slot] = Number.NaN;
@@ -466,7 +446,8 @@ function writeFields(actx: AnimCtx, track: Track, final: boolean): void {
 
   if (count === 0) return;
 
-  const written = count === fields ? track.patch : partialPatch(track);
+  // The whole patch only when every slot moved: a slot a newer track took (`dropField`) keeps its key in the patch.
+  const written = count === names.length ? track.patch : partialPatch(track);
 
   fillPatch(track, written);
   ecs.set(track.entity, track.component, written);
@@ -552,31 +533,56 @@ function releaseFields(
   const owned = track.muted();
   let clean: Record<string, number> | undefined;
 
-  for (const field of Object.keys(track.to)) {
-    const key = keyOf(track, field);
-    const offsets = actx.state.offsets.get(key);
-    const base = actx.state.bases.get(key);
+  // Per ended track: an indexed walk of its live slots; a slot a newer track took is that track's.
+  for (let slot = 0; slot < track.names.length; slot++) {
+    const field = track.names[slot];
+    const key = track.slotKeys[slot];
 
-    if (actx.state.owner.get(key) === track.id) actx.state.owner.delete(key);
+    if (track.live[slot] === 0 || field === undefined || key === undefined) continue;
 
-    if (offsets?.delete(track.id) === true && offsets.size === 0) {
-      actx.state.offsets.delete(key);
+    const base = baseOf(actx, key);
 
-      if (
-        base !== undefined &&
-        stored !== undefined &&
-        !owned.has(field) &&
-        !same(stored[field], cellValue(base))
-      ) {
-        clean ??= {};
-        clean[field] = cellValue(base);
-      }
+    if (ownerOf(actx, key) === track.id) releaseOwner(actx, key);
+
+    if (
+      dropOffset(actx, track, key) &&
+      base !== undefined &&
+      stored !== undefined &&
+      !owned.has(field) &&
+      !same(stored[field], cellValue(base))
+    ) {
+      clean ??= {};
+      clean[field] = cellValue(base);
     }
 
-    if (!actx.state.owner.has(key) && !actx.state.offsets.has(key)) actx.state.bases.delete(key);
+    if (ownerOf(actx, key) === undefined && !actx.state.offsets.has(key)) deleteBase(actx, key);
   }
 
   return clean;
+}
+
+/**
+ * Drops the offset an ending track adds to one field and gives its cell back.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track that ends.
+ * @param key - The field key.
+ * @returns True when it was the field's last offset: the field stands on its base alone now.
+ */
+function dropOffset(actx: AnimCtx, track: Track, key: string): boolean {
+  const offsets = actx.state.offsets.get(key);
+  const offset = offsets?.get(track.id);
+
+  if (offsets === undefined || offset === undefined) return false;
+
+  releaseCell(offset);
+  offsets.delete(track.id);
+
+  if (offsets.size > 0) return false;
+
+  actx.state.offsets.delete(key);
+
+  return true;
 }
 
 /**
@@ -612,11 +618,15 @@ function endTrack(actx: AnimCtx, track: Track): void {
  * @param field - The field the newer track took.
  */
 function dropField(actx: AnimCtx, track: Track, field: string): void {
-  delete track.to[field];
-  track.live[track.names.indexOf(field)] = 0;
+  const slot = track.names.indexOf(field);
+
+  if (slot === -1 || track.live[slot] === 0) return;
+
+  // Dead by slot: no key leaves `to` or the patch, so neither falls into dictionary mode. A track with a dead field
+  // writes its patch of the moved fields only (`writeFields`), so the field the newer track took is never written back.
+  track.live[slot] = 0;
+  track.patch[field] = undefined;
   track.kept -= 1;
-  // The patch keeps exactly the fields of `to`: a field the newer track took is never written back.
-  track.patch = { ...track.to };
   if (track.kept === 0) endTrack(actx, track);
 }
 
@@ -634,10 +644,10 @@ function claimFields(actx: AnimCtx, track: Track): void {
   for (let slot = 0; slot < names.length; slot++) {
     const field = names[slot] ?? "";
     const key = slotKeys[slot] ?? "";
-    const ownerId = actx.state.owner.get(key);
+    const ownerId = ownerOf(actx, key);
     const older = ownerId === undefined ? undefined : actx.state.tracks.get(ownerId);
 
-    actx.state.owner.set(key, track.id);
+    claimOwner(actx, key, track.id);
     if (older !== undefined) dropField(actx, older, field);
   }
 }
@@ -673,16 +683,6 @@ export function beginFrame(actx: AnimCtx): void {
 }
 
 /**
- * The empty set of the fields a new track skipped. It lives in its own function because lint
- * rule L5 refuses a collection built inside an exported declaration.
- *
- * @returns An empty set of field names.
- */
-function noMaskedFields(): Set<string> {
-  return new Set();
-}
-
-/**
  * The target of a new track: the fields the caller passed, plus every field a keyframe segment
  * names at the last value a segment gives it, so `claimFields` books the whole walk at once.
  *
@@ -706,30 +706,187 @@ function targetOf(
 }
 
 /**
- * The typed arrays of a new track, over one buffer, with the target and the colour flag of each
- * slot written in.
+ * How many fields a target names.
  *
- * @param component - The component the track writes.
- * @param names - The target fields in slot order.
- * @param target - The target record the track owns.
- * @returns The nine views of the track.
+ * @param target - The target fields.
+ * @returns The count.
+ * @example
+ * ```ts
+ * fieldCount({ x: 1, y: 2 }); // 2
+ * ```
  */
-function cellsOf(
-  component: AnyComponent,
-  names: readonly string[],
-  target: Readonly<Record<string, number>>
-): SlotCells {
-  const cells = slotCellsOf(names.length);
+function fieldCount(target: Readonly<Record<string, number>>): number {
+  let count = 0;
 
-  // eslint-disable-next-line unicorn/no-for-loop -- the slot indexes two arrays of the track
-  for (let slot = 0; slot < names.length; slot++) {
-    const field = names[slot] ?? "";
+  // Per start: `for…in` reads the enum cache of the target's shape, no key array.
+  for (const field in target) if (Object.hasOwn(target, field)) count++;
 
-    cells.targets[slot] = target[field] ?? 0;
-    cells.colors[slot] = isColorField(component, field) ? 1 : 0;
+  return count;
+}
+
+/**
+ * Tells whether a kept record's slots name the fields of a target, in its order.
+ *
+ * @param names - The slot names of the record.
+ * @param target - The target fields of the track that starts.
+ * @returns True when every slot names the target's field of its index.
+ * @example
+ * ```ts
+ * sameNames(["x", "y"], { x: 1, y: 2 }); // true
+ * ```
+ */
+function sameNames(names: readonly string[], target: Readonly<Record<string, number>>): boolean {
+  let slot = 0;
+
+  for (const field in target) {
+    if (names[slot] !== field) return false;
+
+    slot++;
   }
 
-  return cells;
+  return slot === names.length;
+}
+
+/**
+ * A blank track record of one component with the slots of a target, made when no free record of its slot count is
+ * kept. Every track is this one shape, so the frame step reads one hidden class; `fitTrack` writes the start.
+ *
+ * @param component - The component the track writes.
+ * @param target - The target fields, which name the slots.
+ * @returns The blank record, ended, of id 0.
+ */
+function blankTrack(component: AnyComponent, target: Readonly<Record<string, number>>): Track {
+  const names = Object.keys(target);
+  const record: Track = {
+    id: 0,
+    entity: 0,
+    component,
+    to: { ...target },
+    keys: {},
+    ms: 0,
+    ease: "out",
+    delayMs: 0,
+    ...slotCellsOf(names.length),
+    begun: false,
+    names,
+    kept: names.length,
+    slotKeys: names.map(() => ""),
+    muted: noneMuted,
+    additive: false,
+    driven: false,
+    bornFrame: 0,
+    ended: true,
+    segments: undefined,
+    repeatsLeft: 0,
+    held: false,
+    masked: new Set(),
+    keep: false,
+    reveals: undefined,
+    patch: { ...target },
+    partial: undefined
+  };
+
+  return record;
+}
+
+/** The empty set a blank record's `muted` answers until a start writes the caller's. */
+const NONE_MUTED: ReadonlySet<string> = Object.freeze(new Set<string>());
+
+/**
+ * The muted fields of a blank record: none.
+ *
+ * @returns The shared empty set.
+ */
+function noneMuted(): ReadonlySet<string> {
+  return NONE_MUTED;
+}
+
+/**
+ * Gives a kept record the names of another target of the same slot count: new names, key table, target and patch.
+ *
+ * @param track - The kept record.
+ * @param component - The component the track writes now.
+ * @param target - The target fields of the track that starts.
+ */
+function renameTrack(
+  track: Track,
+  component: AnyComponent,
+  target: Readonly<Record<string, number>>
+): void {
+  track.component = component;
+  track.names = Object.keys(target);
+  track.keys = {};
+  track.to = { ...target };
+  track.patch = { ...target };
+  track.partial = undefined;
+  track.partialMoved.fill(0);
+}
+
+/**
+ * Writes the slots of a record for a track that starts: the key of each field on its entity, the target and the colour
+ * flag of each slot, and the cells a frame reads back to their start (`live` 1, `seen` NaN, the rest 0). The names of
+ * the record are the target's.
+ *
+ * @param track - The record of the track that starts.
+ * @param entity - The entity it animates.
+ * @param target - The target fields, in slot order.
+ */
+function fitSlots(track: Track, entity: Entity, target: Readonly<Record<string, number>>): void {
+  const { names, slotKeys, keys, to, targets } = track;
+  const component = track.component;
+  const name = component.componentName;
+
+  // Per start: an indexed pass over the slots; the key strings come out of the cache of `keyFor`.
+  // eslint-disable-next-line unicorn/no-for-loop -- the slot indexes the cells of the track
+  for (let slot = 0; slot < names.length; slot++) {
+    const field = names[slot] ?? "";
+    const key = keyFor(entity, name, field);
+
+    slotKeys[slot] = key;
+    keys[field] = key;
+    targets[slot] = target[field] ?? 0;
+    to[field] = targets[slot] ?? 0;
+    track.colors[slot] = isColorField(component, field) ? 1 : 0;
+  }
+
+  track.clock.fill(0);
+  track.starts.fill(0);
+  track.values.fill(0);
+  track.seen.fill(Number.NaN);
+  track.live.fill(1);
+  track.moved.fill(0);
+}
+
+/**
+ * The record a track that starts is written into: a free one of its slot count, renamed when it named other fields,
+ * else a blank one. A kept patch with a field a newer track took is made again: it holds that field as `undefined`.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param entity - The entity to animate.
+ * @param component - The component to animate.
+ * @param target - The target fields.
+ * @returns The record, its slots written, the rest of the start still to write.
+ */
+function recordOf(
+  actx: AnimCtx,
+  entity: Entity,
+  component: AnyComponent,
+  target: Readonly<Record<string, number>>
+): Track {
+  const count = fieldCount(target);
+  const kept = takeTrack(actx.state, count);
+  const track = kept ?? blankTrack(component, target);
+
+  if (kept !== undefined && (kept.component !== component || !sameNames(kept.names, target))) {
+    renameTrack(kept, component, target);
+  } else if (kept !== undefined && kept.kept < count) {
+    kept.patch = { ...target };
+  }
+
+  if (track.masked.size > 0) track.masked.clear();
+  fitSlots(track, entity, target);
+
+  return track;
 }
 
 /**
@@ -823,47 +980,42 @@ export function startTrack(
   muted: () => ReadonlySet<string>,
   driven = false
 ): Track {
-  const target = targetOf(to, options.segments);
+  const segments = options.segments;
+  // A keyframe walk books every field its segments name: its target is built once, here.
+  const target = segments === undefined ? to : targetOf(to, segments);
   const repeats = repeatsOf(options.repeat);
   const keep = options.reduced === "keep";
   const cut = actx.state.reducedMotion && !keep;
   const instant = cut && repeats !== Number.POSITIVE_INFINITY;
-  const keys = keysOf(entity, component.componentName, target);
-  const names = Object.keys(target);
+  // The record of a track the frame step dropped, or a blank one: a 0 ms rest move makes none once warm.
+  const track = recordOf(actx, entity, component, target);
+  const count = track.names.length;
+
+  track.id = actx.state.nextId;
+  track.entity = entity;
+  track.ms = instant ? 0 : options.ms;
+  track.ease = options.ease ?? "out";
+  track.delayMs = instant ? 0 : (options.delayMs ?? 0);
+  track.begun = false;
+  track.kept = count;
+  track.muted = muted;
+  track.additive = options.additive === true;
+  track.driven = driven;
+  track.bornFrame = actx.state.frame;
   // A view's loop stands on its first key under reduced motion; a timeline's would hold its play
   // open on a still pose for ever, so it is not started.
-  const bornEnded = names.length === 0 || (cut && driven && repeats === Number.POSITIVE_INFINITY);
-  const track: Track = {
-    id: actx.state.nextId,
-    entity,
-    component,
-    to: target,
-    keys,
-    ms: instant ? 0 : options.ms,
-    ease: options.ease ?? "out",
-    delayMs: instant ? 0 : (options.delayMs ?? 0),
-    ...cellsOf(component, names, target),
-    begun: false,
-    names,
-    kept: names.length,
-    slotKeys: names.map(field => keys[field] ?? ""),
-    muted,
-    additive: options.additive === true,
-    driven,
-    bornFrame: actx.state.frame,
-    ended: bornEnded,
-    segments: options.segments,
-    repeatsLeft: instant ? 0 : repeats,
-    held: false,
-    masked: noMaskedFields(),
-    keep,
-    reveals: revealsOf(component, target),
-    patch: { ...target },
-    partial: undefined
-  };
+  track.ended = count === 0 || (cut && driven && repeats === Number.POSITIVE_INFINITY);
+  track.segments = segments;
+  track.repeatsLeft = instant ? 0 : repeats;
+  track.held = false;
+  track.keep = keep;
+  track.reveals = revealsOf(component, target);
 
   actx.state.nextId += 1;
   if (track.ended) return track;
+
+  // Read before any write: a caller's options object may be one it writes again for its next start.
+  const lands = landsAtStart(track, options);
 
   if (track.additive) fileAdditive(actx, track);
   else claimFields(actx, track);
@@ -873,7 +1025,7 @@ export function startTrack(
   countPlaying(actx.deps.world.ecs, entity, 1);
   actx.deps.time.wake();
   warnIfCrowded(actx);
-  if (landsAtStart(track, options)) writeFields(actx, track, true);
+  if (lands) writeFields(actx, track, true);
 
   return track;
 }
@@ -1057,12 +1209,91 @@ export function cancelTrack(actx: AnimCtx, track: Track): void {
  * @returns The handle.
  */
 export function handleOf(actx: AnimCtx, track: Track): StepMotion {
-  return {
-    finish: (): void => finishTrack(actx, track),
-    cancel: (): void => cancelTrack(actx, track),
-    active: (): boolean => !track.ended,
-    advance: (deltaMs: number): number => advanceTrack(actx, track, deltaMs)
-  };
+  return new TrackMotion(actx, track);
+}
+
+/**
+ * The handle of one start of a track: three fields and the methods of its prototype, no closure. The record behind it
+ * may be written again by a later start once the frame step dropped it; the handle then answers as its own track
+ * ended: never active, `finish` and `cancel` do nothing, `advance` hands the whole delta back. So a hook that keeps
+ * a handle never reaches the next owner of the record.
+ */
+class TrackMotion implements StepMotion {
+  /** Domain context of the anim plugin. */
+  private readonly actx: AnimCtx;
+  /** The record of the track. */
+  private readonly track: Track;
+  /** The id of this start: the record's while it is still this track. */
+  private readonly id: number;
+
+  /**
+   * Opens the handle of a track that just started.
+   *
+   * @param actx - Domain context of the anim plugin.
+   * @param track - The track.
+   */
+  constructor(actx: AnimCtx, track: Track) {
+    this.actx = actx;
+    this.track = track;
+    this.id = track.id;
+  }
+
+  /** Writes the exact target and ends the track, while it is this handle's. */
+  finish(): void {
+    if (this.track.id === this.id) finishTrack(this.actx, this.track);
+  }
+
+  /** Ends the track where it stands, while it is this handle's. */
+  cancel(): void {
+    if (this.track.id === this.id) cancelTrack(this.actx, this.track);
+  }
+
+  /**
+   * Tells whether the track still runs.
+   *
+   * @returns True while the record is this track's and it has not ended.
+   */
+  active(): boolean {
+    return this.track.id === this.id && !this.track.ended;
+  }
+
+  /**
+   * Advances the track by one delta, while it is this handle's.
+   *
+   * @param deltaMs - Milliseconds of game time to consume.
+   * @returns The milliseconds left over past the end of the track; the whole delta for an ended one.
+   */
+  advance(deltaMs: number): number {
+    return this.track.id === this.id ? advanceTrack(this.actx, this.track, deltaMs) : deltaMs;
+  }
+}
+
+/**
+ * Drops every ended track of the dense list in place, keeping the order of the rest, and keeps the record of each for
+ * a later start (`pool.ts`). Allocates nothing: a list with nothing ended is only read.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param list - The dense list of the tracks, in start order.
+ */
+function dropEndedTracks(actx: AnimCtx, list: Track[]): void {
+  let kept = 0;
+
+  for (let index = 0; index < list.length; index++) {
+    const track = list[index];
+
+    if (track === undefined) continue;
+
+    if (track.ended) {
+      releaseTrack(actx.state, track);
+      continue;
+    }
+
+    list[kept] = track;
+    kept++;
+  }
+
+  // `pop` and not `length = kept`: a list cut to nothing would let its storage go.
+  while (list.length > kept) list.pop();
 }
 
 /**
@@ -1101,7 +1332,8 @@ export function advanceTracks(actx: AnimCtx, deltaMs: number): void {
     }
   }
 
-  dropEnded(list);
+  dropEndedTracks(actx, list);
+  pruneAbsent(actx);
 
   // The tracks born in this step (an `onMark` listener, a timeline) are the tail of the list: they are sampled too.
   let born = list.length;
@@ -1182,7 +1414,7 @@ function samplesBeforeDraw(actx: AnimCtx, track: Track): boolean {
 function waitsForBase(actx: AnimCtx, track: Track): boolean {
   // per frame: an indexed walk over the slot keys, only for tracks born since the step.
   for (let slot = 0; slot < track.slotKeys.length; slot++) {
-    const ownerId = actx.state.owner.get(track.slotKeys[slot] ?? "");
+    const ownerId = ownerOf(actx, track.slotKeys[slot] ?? "");
     const owner = ownerId === undefined ? undefined : actx.state.tracks.get(ownerId);
 
     if (owner !== undefined && !owner.begun && owner.ms <= 0) return true;
@@ -1227,7 +1459,8 @@ export function finishAllTracks(actx: AnimCtx, keepLoops = false): void {
     finishTrack(actx, track);
   }
 
-  dropEnded(list);
+  dropEndedTracks(actx, list);
+  pruneAbsent(actx);
   actx.state.bornFrom = list.length;
 }
 

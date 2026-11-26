@@ -16,6 +16,7 @@ import {
   Transform,
   type
 } from "../../../../index";
+import { Animation } from "../../../anim/components";
 import type { Manifest } from "../../../assets/types";
 import type { CompiledMessages } from "../../../i18n/types";
 import { installFakeDom } from "../../../renderer/__tests__/fake-dom";
@@ -214,6 +215,27 @@ describe("a box whose layout changes (F47)", () => {
 
     expect(app.world.ecs.get(box, Transform)?.pivot.y).toBe(100);
     expect(tops).toEqual(tops.map(() => before));
+  });
+
+  // F244 В: the rest move without a hook starts from kept records and a kept handle; what it shows stays frame by frame.
+  it("shows its 0 ms rest track and its Animation count for the one frame it lands in", async () => {
+    // Bug caught: a kept track record or handle that keeps the move running a frame longer, or ends it before the
+    // frame it lands in is seen.
+    const game = await startPlate();
+    const { app } = game;
+    const box = app.ui.find("inspect") ?? 0;
+    const seen: string[] = [];
+
+    app.input.tap(app.ui.find("grow") ?? 0);
+    await game.frames(6, () => {
+      const playing = app.world.ecs.get(box, Animation)?.playing ?? 0;
+
+      seen.push(`${playing}:${app.world.projection.motionsOf(box).join(",")}`);
+    });
+
+    expect(seen.filter(entry => entry !== "0:")).toEqual(["1:Transform"]);
+    expect(seen.at(-1)).toBe("0:");
+    expect(app.world.ecs.get(box, Transform)?.pivot.y).toBe(100);
   });
 
   // The other side: a box whose loop adds to its rest keeps that offset through the new rest: no frame drops it.

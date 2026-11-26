@@ -590,6 +590,36 @@ export function play(
   }
 }
 
+/** A `change` hook of `Box` or `Transform`: the value before and after, and the hint of the frame step. */
+type ValueChange<Value> = (
+  view: ViewHandle<unknown>,
+  previous: Value,
+  next: Value,
+  hint?: Hint
+) => Motion;
+
+/**
+ * Plays a `change` hook with the value before and after. Its own function, so the caller, which runs for every element
+ * a solve reaches, builds no closure and keeps no context on the path that plays nothing (F244 В).
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The element the hook belongs to.
+ * @param hook - The `change` hook.
+ * @param previous - The value before.
+ * @param next - The value now.
+ * @param hint - The hint routed to the element in this frame step.
+ */
+export function playChange<Value>(
+  ctx: UiCtx,
+  element: Element,
+  hook: ValueChange<Value>,
+  previous: Value,
+  next: Value,
+  hint: Hint | undefined
+): void {
+  play(ctx, element, view => hook(view, previous, next, hint));
+}
+
 /**
  * Notes a motion that never ends on its element, the set made with the first one.
  *
@@ -759,15 +789,18 @@ export function repose(
   const hook = element.motion?.change?.Transform;
 
   if (hook !== undefined) {
-    play(ctx, element, view => hook(view, previous, next, hint));
+    playChange(ctx, element, hook, previous, next, hint);
 
     return;
   }
 
   // A 0 ms track writes its target as it starts: the pivot `toRest` writes at once and the position
   // land in the same frame (F47), and the next frame step ends it, so an additive loop re-bases.
-  handleOf(ctx, element)?.toRest(Transform, { ms: 0 });
+  handleOf(ctx, element)?.toRest(Transform, REST_NOW);
 }
+
+/** The options of the 0 ms rest track of a repose and a lift: one frozen object, read by the call. */
+const REST_NOW: RestOptions = Object.freeze({ ms: 0 });
 
 /** The components a drag leaves off their rest: the finger writes only the `Transform`. */
 const DROPPED = ["Transform"] as const;
@@ -814,5 +847,5 @@ export function liftRest(ctx: UiCtx, element: Element, units: number): void {
     y: element.rest.y - units
   });
 
-  if (element.live) handleOf(ctx, element)?.toRest(Transform, { ms: 0 });
+  if (element.live) handleOf(ctx, element)?.toRest(Transform, REST_NOW);
 }

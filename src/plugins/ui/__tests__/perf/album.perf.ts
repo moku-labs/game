@@ -14,13 +14,35 @@ import { type AlbumPerf, startAlbumPerf } from "./album.fixture";
 //                       alone. What is left grows with what really changed, not with the root: the 8 rest poses that
 //                       moved (the two pages, the dots) and their 0 ms rest tracks, the restyled dots, and the `Box`
 //                       writes of the 256 slid elements
+// Change 2026-11-26-f244-peek-pool, slice 1: a turn now runs the frame step of phase `animate` first, which ends the
+// 0 ms rest tracks of the turn before, as every real frame does (without it each turn kept its 8 tracks in anim's
+// list). Measured on Node 24.21, warm, with that step:
+//   before the change   139 360 B a turn
+//   now                 22 512 to 23 638 B: the closures of `repose` and `change.Box` are gone, the 8 rest tracks
+//                       start from kept records through kept handles, options and targets, the bases and owners stay
+//                       in their tables, rest poses and the `Shape` of an element are written in place, a resolved
+//                       style is kept per style object, and a rect is written into `Box` by name. What is left, by
+//                       the heap profile: the new rest pose `restTransform` builds per moved element, Yoga's wrappers
+//                       (yoga-layout), the visual and input values of the restyled dots and the title text, the
+//                       `Animation` count added and removed per track through the ECS commands, and the table of
+//                       running tracks, whose ids are new at every start. Not yet 0: the remainder is named in the
+//                       report of the change, not hidden here.
 // ---------------------------------------------------------------------------
 
 /** Calls of a window: a turn walks the whole root, ~1.1 ms; `alloc` warms it 5 000 times first. */
 const CALLS = 200;
 
-/** The bytes a turn may keep: the measured 141 676 B and a margin, far under the 841 826 B of a whole-root apply. */
-const TURN_BYTES = 160_000;
+/**
+ * The bytes a turn may keep of the engine's own, the handles left out: the measured 22 512 to 23 638 B and a margin,
+ * far under the 139 360 B before the change.
+ */
+const TURN_BYTES = 26_000;
+
+/**
+ * The bytes of the handles a turn's rest tracks hand their caller: one small object per started track, 8 tracks, 48 B
+ * each, measured by `anim/__tests__/perf/rest-track.perf.ts`. A hook may keep a handle, so it is not pooled.
+ */
+const HANDLE_BYTES = 8 * 48;
 
 /**
  * The x of a keyed element's rect.
@@ -62,6 +84,6 @@ describe("ui: a turn of the album's set page, heap per turn", () => {
     const bytes = alloc(perf.turn, CALLS);
 
     await annotate(`a turn of ${perf.elements} elements: ${bytes} B`);
-    expect(bytes).toBeLessThanOrEqual(TURN_BYTES);
+    expect(bytes).toBeLessThanOrEqual(TURN_BYTES + HANDLE_BYTES);
   });
 });

@@ -17,7 +17,7 @@ import { Text } from "../text/components";
 import { isTextFormat } from "../text/format";
 import type { TextBind } from "../text/types";
 import type { AnyComponentType, AnyComponentValue } from "../world/types";
-import type { Element } from "./jsx/types";
+import type { Element, KeptShape } from "./jsx/types";
 import type { ElementLookup, Rect } from "./layout/types";
 import type { ResolvedStyle } from "./styles/types";
 
@@ -75,8 +75,13 @@ export function writtenKeyOf(element: Element): string {
  * ```
  */
 export function isContainer(type: string): boolean {
-  return ["screen", "layer", "row", "column", "stack", "spacer", ANCHOR, CONTENT].includes(type);
+  return CONTAINERS.has(type);
 }
+
+/** The tags that draw nothing of their own: one frozen set, read by every `visualOf` of a container. */
+const CONTAINERS: ReadonlySet<string> = Object.freeze(
+  new Set(["screen", "layer", "row", "column", "stack", "spacer", ANCHOR, CONTENT])
+);
 
 /**
  * Reads the asset key of an image or an icon out of its props.
@@ -433,6 +438,11 @@ export function visualOf(element: Element): AnyComponentValue[] {
   const filled = style.fill !== undefined || style.stroke !== undefined;
   const invisible = isContainer(type) && !filled;
 
+  // No `change.Shape` hook reads the value before: the element's kept value is written in place (F244 В).
+  if (element.motion?.change?.Shape === undefined) {
+    return keptShapeOf(element, style, rect, invisible, clip || type === "input");
+  }
+
   const shape = {
     kind: style.shape ?? "rect",
     w: rect.w,
@@ -461,6 +471,72 @@ export function visualOf(element: Element): AnyComponentValue[] {
       cap: style.cap ?? arcDefaults.cap
     })
   ];
+}
+
+/**
+ * A new kept `Shape` of an element: the defaults of the type, in their order, its fields written by `keptShapeOf`.
+ *
+ * @param arc - Whether it draws an arc.
+ * @returns The kept value and its one-value list.
+ */
+function newKeptShape(arc: boolean): KeptShape {
+  const value: Record<string, unknown> = { ...Shape.defaults };
+  const entry: AnyComponentValue = { type: Shape, value };
+
+  return { arc, value, values: [entry] };
+}
+
+/**
+ * The `Shape` of an element no `change.Shape` hook watches, as `visualOf` builds it, written into the element's kept
+ * value: the same fields as `Shape({ ... })` makes, so every write, record and add copies what it did. An arc keeps
+ * its share and its ends; a shape that turns into an arc, or back, gets a new kept value.
+ *
+ * @param element - The element to draw.
+ * @param style - Its resolved style.
+ * @param rect - Its rect.
+ * @param invisible - Whether it is a container that draws nothing.
+ * @param clip - Whether its rectangle clips.
+ * @returns The element's kept one-value list.
+ */
+function keptShapeOf(
+  element: Element,
+  style: ResolvedStyle,
+  rect: Rect,
+  invisible: boolean,
+  clip: boolean
+): AnyComponentValue[] {
+  const kind = style.shape ?? "rect";
+  const arc = kind === "arc";
+  let kept = element.keptShape;
+
+  if (kept?.arc !== arc) {
+    kept = newKeptShape(arc);
+    element.keptShape = kept;
+  }
+
+  const value = kept.value;
+
+  value.kind = kind;
+  value.w = rect.w;
+  value.h = rect.h;
+  value.fill = style.fill ?? Shape.defaults.fill;
+  // No `fill` paints nothing inside: a stroke-only ring, or a button whose label is all it shows.
+  value.fillAlpha = style.fill === undefined ? 0 : Shape.defaults.fillAlpha;
+  // The alpha fades the children too: a container that draws nothing keeps its style's.
+  value.alpha = style.alpha ?? 1;
+  value.radius = style.radius ?? 0;
+  value.stroke = style.stroke ?? Shape.defaults.stroke;
+  value.strokeWidth = invisible ? 0 : (style.strokeWidth ?? 0);
+  value.dash = style.dash ?? 0;
+  // A text field clips its value to its box, so a long one never leaves it.
+  value.clip = clip;
+
+  if (arc) {
+    value.sweep = style.sweep ?? arcDefaults.sweep;
+    value.cap = style.cap ?? arcDefaults.cap;
+  }
+
+  return kept.values;
 }
 
 /**

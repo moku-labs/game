@@ -255,6 +255,16 @@ export type ScrollMotion = {
 export type StyleBasis = { epoch: number; rowHeight: number | undefined };
 
 /**
+ * The `Shape` of an element `visualOf` writes in place: whether it draws an arc (its fields differ), the value, and the
+ * one-value list handed out. Kept while no `change.Shape` hook reads the value before.
+ */
+export type KeptShape = {
+  arc: boolean;
+  value: Record<string, unknown>;
+  values: AnyComponentValue[];
+};
+
+/**
  * One live element: the entity, the Yoga node, the resolved style and the place in the tree.
  * `rect` is natural: under a `fit` ancestor it is the rect before that ancestor's scale. `fit` is
  * the element's own fit scale (1 without `fit: "contain"`), and `rest` the rest `Transform` last
@@ -312,6 +322,8 @@ export type Element = {
    * rect stays and the application of the solve does not reach it (F244).
    */
   restyled?: boolean;
+  /** The `Shape` the element is drawn with while no `change.Shape` hook reads it, written in place (F244 В). */
+  keptShape?: KeptShape;
   fit: number;
   rest: TransformValue;
   handles: MotionHandle[];

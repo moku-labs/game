@@ -5,7 +5,16 @@
 import type { AnyComponentValue, ComponentType, Entity } from "../ecs/types";
 import { neutralOf } from "../neutral";
 import { deepEquals } from "./diff";
-import { drivenComponents, inertHandle, loopOffsets, mutedFields, startTrack } from "./driver";
+import {
+  drivenComponents,
+  inertHandle,
+  loopOffsets,
+  mutedFields,
+  type RestTiming,
+  startRestTrack,
+  startTrack
+} from "./driver";
+import { restValue } from "./rests";
 import type {
   AnyProjectionSpec,
   Motion,
@@ -13,6 +22,7 @@ import type {
   Mounted,
   NumericFields,
   ProjectionCtx,
+  ProjectionState,
   RestOptions,
   TweenOptions,
   View,
@@ -78,7 +88,8 @@ function restWithNeutrals(
 
   let completed: Record<string, unknown> | undefined;
 
-  for (const field of Object.keys(stored)) {
+  // Per rest move: `for…in` over the stored value's own fields, no key array.
+  for (const field in stored) {
     if (field in rest) continue;
 
     const neutral = neutralOf(type, field);
@@ -138,6 +149,128 @@ function writeUnmuted(
   else pctx.deps.ecs.set(entity, asComponent(value.type), allowed);
 }
 
+/** The handle `viewOf` keeps for one element, with the view record it plays on. */
+export type KeptHandle = { view: View; handle: ViewHandle<unknown> };
+
+/**
+ * The handle `viewOf` kept for an element, if any.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param entity - The element's entity.
+ * @returns The kept handle and its view record, or `undefined`.
+ */
+export function keptHandleOf(state: ProjectionState, entity: Entity): KeptHandle | undefined {
+  return state.elementHandles.get(entity);
+}
+
+/**
+ * Keeps the handle `viewOf` made for an element, for its next calls.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param entity - The element's entity.
+ * @param kept - The handle and its view record.
+ */
+export function keepHandle(state: ProjectionState, entity: Entity, kept: KeptHandle): void {
+  state.elementHandles.set(entity, kept);
+}
+
+/**
+ * Forgets the kept handle of an element, with its rest pose: its key was removed or its entity is gone.
+ *
+ * @param state - The projection branch of the plugin state.
+ * @param entity - The element's entity; every element's when left out.
+ */
+export function forgetHandle(state: ProjectionState, entity?: Entity): void {
+  if (entity === undefined) state.elementHandles.clear();
+  else state.elementHandles.delete(entity);
+}
+
+/** The timing of the rest track a `toRest` starts, written in place per call and read at once. */
+const REST_TIMING: RestTiming = { ms: 0, ease: "out", delayMs: 0 };
+
+/** The patch of the fields that are no number of one component, kept per component name with its fields in order. */
+type OthersPatch = { names: string[]; patch: Record<string, unknown> };
+
+/**
+ * The patch of the fields of a rest value that are no number and nobody mutes: the kept one of its component, its
+ * values written in place while it names the same fields; a new one kept when they changed.
+ *
+ * @param othersPatches - The kept patches, per component name (`state.othersPatches`).
+ * @param name - Component name.
+ * @param rest - The rest value.
+ * @param muted - The fields another writer owns.
+ * @returns The patch, or `undefined` when no such field is left.
+ */
+function othersOf(
+  othersPatches: Map<string, OthersPatch>,
+  name: string,
+  rest: Readonly<Record<string, unknown>>,
+  muted: ReadonlySet<string>
+): Record<string, unknown> | undefined {
+  let kept = othersPatches.get(name);
+  let slot = 0;
+  let same = kept !== undefined;
+
+  // Per rest move: `for…in` over the rest value, no entries and no key array.
+  for (const field in rest) {
+    const value = rest[field];
+
+    if (typeof value === "number" || muted.has(field)) continue;
+
+    if (kept !== undefined && kept.names[slot] === field) kept.patch[field] = value;
+    else same = false;
+
+    slot++;
+  }
+
+  if (slot === 0) return undefined;
+  if (same && kept !== undefined && slot === kept.names.length) return kept.patch;
+
+  kept = { names: [], patch: {} };
+
+  for (const field in rest) {
+    const value = rest[field];
+
+    if (typeof value === "number" || muted.has(field)) continue;
+
+    kept.names.push(field);
+    kept.patch[field] = value;
+  }
+
+  othersPatches.set(name, kept);
+
+  return kept.patch;
+}
+
+/**
+ * Writes the fields of a rest value that are no number at once, leaving out every field another writer owns: what a
+ * `toRest` writes before its track brings the numbers home. The entity is given the whole value when it lacks the
+ * component. The patch is kept per component and copied by `ecs.set`, so a rest move builds none.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param entity - The entity to write.
+ * @param value - The rest component value, which names the type.
+ * @param rest - The rest value with its neutrals.
+ */
+function writeOthers(
+  pctx: ProjectionCtx,
+  entity: Entity,
+  value: AnyComponentValue,
+  rest: Readonly<Record<string, unknown>>
+): void {
+  const name = value.type.componentName;
+  const patch = othersOf(
+    pctx.ctx.state.projection.othersPatches,
+    name,
+    rest,
+    mutedFields(pctx, entity, name)
+  );
+
+  if (patch === undefined) return;
+  if (storedValue(pctx, entity, value.type) === undefined) pctx.deps.ecs.add(entity, value);
+  else pctx.deps.ecs.set(entity, asComponent(value.type), patch);
+}
+
 /**
  * Builds the handle one motion hook is given. Nothing on it reaches another view: `peer` answers
  * with an item, never with an entity.
@@ -163,7 +296,8 @@ export function createViewHandle(
       pctx.deps.ecs.get(view.entity, component),
 
     rest: <Value extends object>(component: ComponentType<Value>) => {
-      const stored = view.rest.get(component.componentName)?.value;
+      const entry = view.rest.get(component.componentName);
+      const stored = entry === undefined ? undefined : restValue(entry);
 
       return stored === undefined || stored === true ? undefined : (stored as Readonly<Value>);
     },
@@ -205,23 +339,32 @@ export function createViewHandle(
 
       if (target === undefined || target.value === true) return inertHandle();
 
-      const { numeric, other } = splitFields(
-        restWithNeutrals(
-          target.type,
-          target.value as Record<string, unknown>,
-          storedValue(pctx, view.entity, target.type)
-        )
+      const rest = restWithNeutrals(
+        target.type,
+        target.value as Record<string, unknown>,
+        storedValue(pctx, view.entity, target.type)
       );
 
-      if (Object.keys(other).length > 0) writeUnmuted(pctx, view.entity, target, other);
+      writeOthers(pctx, view.entity, target, rest);
 
-      return startTrack(pctx, view.entity, asComponent(component), numeric, {
-        ms: options?.ms ?? pctx.ctx.config.settleMs,
-        ease: options?.ease ?? "out",
-        delayMs: options?.delayMs ?? 0,
+      const timing = REST_TIMING;
+
+      timing.ms = options?.ms ?? pctx.ctx.config.settleMs;
+      timing.ease = options?.ease ?? "out";
+      timing.delayMs = options?.delayMs ?? 0;
+
+      // Without a reduced rule or a label (a rest move of `ui`), the track record keeps the target and the options.
+      if (options?.reduced === undefined && options?.label === undefined) {
+        return startRestTrack(pctx, view.entity, asComponent(component), rest, timing);
+      }
+
+      return startTrack(pctx, view.entity, asComponent(component), splitFields(rest).numeric, {
+        ms: timing.ms,
+        ease: timing.ease,
+        delayMs: timing.delayMs,
         additive: false,
-        ...(options?.reduced === undefined ? {} : { reduced: options.reduced }),
-        ...(options?.label === undefined ? {} : { label: options.label })
+        ...(options.reduced === undefined ? {} : { reduced: options.reduced }),
+        ...(options.label === undefined ? {} : { label: options.label })
       });
     },
 

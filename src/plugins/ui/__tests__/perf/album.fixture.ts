@@ -24,7 +24,10 @@ export type AlbumPerf = {
   elements: number;
   /** The root's tree written and marked changed: the render a commit brings, before `ui` runs. */
   render: (tree: DescriptionNode) => void;
-  /** One turn and back: the two pages of the strip swap places, then the reconcile, the solve and the enter. */
+  /**
+   * One turn and back: the two pages of the strip swap places, then the frame step of phase `animate`, the reconcile,
+   * the solve and the enter.
+   */
   turn: Step;
   /** The next step of the swipe through the sets, then one whole frame of the app. */
   swipe: Step;
@@ -71,9 +74,12 @@ export async function startAlbumPerf(): Promise<AlbumPerf> {
     tree.node = node;
     ecs.set(root, Tree, NO_PATCH);
   };
-  // The systems of `ui` a commit runs: the layout phase and the enter of phase `sync`. A turn marks the same entities
-  // at every call, so its change lists stay as they are.
+  // The frame of a commit: phase `animate`, whose step ends the 0 ms rest tracks the turn before started, then the
+  // systems of `ui` a commit runs, the layout phase and the enter of phase `sync`. Without the step every turn would
+  // keep the tracks it started in anim's list. A turn marks the same entities at every call, so its change lists stay
+  // as they are.
   const frame = (): void => {
+    ui.animate();
     ui.reconcile();
     ui.solve();
     ui.enter();

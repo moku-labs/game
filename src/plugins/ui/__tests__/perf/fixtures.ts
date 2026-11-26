@@ -7,6 +7,7 @@
 import { vi } from "vitest";
 import { alloc } from "../../../../../tests/perf/alloc";
 import { Pointer, Pressed, Scrollable } from "../../../input/components";
+import { timePlugin } from "../../../time";
 import type { Time } from "../../../time/types";
 import { Tree } from "../../../world/ecs/define";
 import type { AnySystem, Entity, SystemContext } from "../../../world/types";
@@ -51,9 +52,17 @@ const SYSTEM_FRAME = Object.freeze({ time: FRAME }) as unknown as SystemContext;
 /** A `Box` or `Pressed` hook of `ui`: it takes the entity the value was added to or removed from, and reads no value. */
 type WorldHook = (entity: Entity, value: true) => void;
 
+/** A frame callback of phase `animate`, as a plugin registered it with `time.onFrame`. */
+type FrameCallback = (time: Readonly<Time>) => void;
+
 /** The started perf app and the `ui` steps a window calls. */
 export type PerfUi = {
   app: PerfApp;
+  /**
+   * Phase `animate` of a frame, without the other phases: the frame step of `anim`, which ends the 0 ms rest tracks
+   * of the frame before and drops them from its list, then the sweep of `world`, which forgets them.
+   */
+  animate: Step;
   /** The system `ui.reconcile` of phase `layout`. */
   reconcile: Step;
   /** The system `ui.solve` of phase `layout`. */
@@ -77,6 +86,27 @@ export type PerfUi = {
  * @returns The app and its `ui` steps.
  */
 export async function startPerfUi(): Promise<PerfUi> {
+  const animating: FrameCallback[] = [];
+  const timeApi = timePlugin.spec.api;
+
+  if (timeApi === undefined) throw new Error("perf: the time plugin has no api factory");
+
+  // `anim` registers its frame step in `onInit`, inside `createApp`: the time API it is handed is wrapped before, so
+  // the callbacks of phase `animate` are read off as they register, in their order.
+  vi.spyOn(timePlugin.spec, "api").mockImplementation(ctx => {
+    const api = timeApi(ctx);
+    const onFrame = api.onFrame;
+
+    return {
+      ...api,
+      onFrame: (phase, callback) => {
+        if (phase === "animate") animating.push(callback);
+
+        return onFrame(phase, callback);
+      }
+    };
+  });
+
   const app = createPerfApp();
   const ecs = app.world.ecs;
   const systems = new Map<string, Step>();
@@ -141,6 +171,10 @@ export async function startPerfUi(): Promise<PerfUi> {
 
   return {
     app,
+    animate: (): void => {
+      // per frame: an indexed walk of the callbacks, no iterator.
+      for (let index = 0; index < animating.length; index += 1) animating[index]?.(FRAME);
+    },
     reconcile,
     solve,
     enter,

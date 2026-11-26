@@ -81,6 +81,8 @@ export function createAnimState(ctx: { readonly config: Readonly<Config> }): Sta
     frameMutes: emptyMap(),
     offFrames: [],
     loopsHeld: undefined,
-    warnedLoops: emptySet()
+    warnedLoops: emptySet(),
+    freeTracks: [],
+    absent: new Int32Array(2)
   };
 }

@@ -20,6 +20,7 @@ import {
   isHeld,
   liftRest,
   play,
+  playChange,
   playExtraChange,
   poseEnter,
   repose,
@@ -170,7 +171,7 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
       if (hook === undefined || isHeld(ctx, element)) return false;
 
-      play(ctx, element, view => hook(view, previous, element.rect, hint));
+      playChange(ctx, element, hook, previous, element.rect, hint);
 
       return true;
     },
