@@ -200,6 +200,13 @@ export type View = {
   hudScale: number;
   hudScaleX: number;
   hudScaleY: number;
+  /** A HUD return's walk still moves this view (F245): it takes no tap until the walk ends. */
+  hudWalking: boolean;
+  /**
+   * The walk gave this view a new `hudRotation` (F245) its top has not been turned to yet: the step of the HUD parts
+   * turns it without reading the rotation Pixi holds (a read V8 boxes there).
+   */
+  hudTurned: boolean;
   /**
    * A held top of a scene build (spec 31) or of a warm window (spec 33, slice B+D): a view of the next scene, or of a
    * closed window, with no parent or with a live parent, built while the current scene stays drawn. It hangs nowhere
@@ -2169,13 +2176,14 @@ export type ClampedReturnPart = {
 };
 
 /**
- * A curve of a clamped `hudReturn` (F245): a named curve of `world`, eased in a cell, or a cubic-bezier solved once with
- * its four numbers kept; `undefined` is linear. Private to the renderer.
+ * A curve of a clamped `hudReturn` (F245): a named curve of `world`, eased in a cell, or a cubic-bezier solved once by
+ * `anim`'s `cubicBezier` and read into `table` (its progress at even steps of time, a frame reads two cells), its four
+ * numbers kept; `undefined` is linear. Private to the renderer.
  */
 export type ClampedCurve =
   | { readonly name: Exclude<Ease, (t: number) => number> }
   | {
-      readonly bezier: (t: number) => number;
+      readonly table: Float64Array;
       readonly points: readonly [number, number, number, number];
     }
   | undefined;

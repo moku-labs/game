@@ -37,7 +37,7 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 | `NineSlice({ texture, width, height, alpha, tint, debug, clip, hollow?, blend? })` | `"", 0, 0, 1, 0xffffff, false, false`; `hollow` and `blend` absent (read as `false` and `"normal"`) | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. The panel itself is never masked. `alpha` fades the panel and the entity's children. `hollow: true` draws the rim alone, the eight border cells and never the centre (see "Hollow nine-slices"); the hit box stays the whole panel. `blend: "add"` or `"screen"` lays the panel, filled or hollow, over what is under it (see "Blend"). |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. `effects` places its particle containers through it, on entities it owns. |
-| `Overlay({ dim, dimColor, cover, hud, hudInert, fade, hold, hudReturn? })` | `0, 0x000000, "none", "all", false, 250, false`, `hudReturn` absent | Marks the view an overlay is drawn from: what is drawn before its root is kept as one picture, never stale, and not drawn at all under `cover: "opaque"`; the engine draws its dim and fades the HUD parts `hud` does not keep, or with `hud: "under"` draws the whole HUD under its dim. `hold: true` holds the endless loops under it while it stands. `hudReturn: { delayMs, fadeMs, parts? }` brings the parts it hid back on their own clock after it leaves. See "Overlays and the HUD". |
+| `Overlay({ dim, dimColor, cover, hud, hudInert, fade, hold, hudReturn? })` | `0, 0x000000, "none", "all", false, 250, false`, `hudReturn` absent | Marks the view an overlay is drawn from: what is drawn before its root is kept as one picture, never stale, and not drawn at all under `cover: "opaque"`; the engine draws its dim and fades the HUD parts `hud` does not keep, or with `hud: "under"` draws the whole HUD under its dim. `hold: true` holds the endless loops under it while it stands. `hudReturn: { delayMs, fadeMs, ease?, keyframes?, parts? }` brings the parts it hid back on their own clock after it leaves, on a curve and a walk of `Transform` keys when given. See "Overlays and the HUD". |
 | `HudPart({ key })` | `""` | A view of the HUD layer an overlay keeps shown or lets fade, by `key`. |
 | `Source({ scale })` | `0.25` | Marks the view a frosted window reads in place of the canvas (F126 stage 5): the view and its subtree are drawn ahead of the canvas pass into a texture the screen's size at `scale` of the canvas resolution (`0.5` or `0.25`; another value draws at `0.25`, and a dev build warns `renderer:source-scale` `{ entity, scale }` once), kept until something under it changes. The view still draws on the canvas as before. See "Sources". |
 | `Shape({ kind, w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, dash, clip, sweep?, cap? })` | `"rect", 0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, 0, false`; `sweep` and `cap` absent (an arc reads them as `1` and `"round"`, `arcDefaults`) | A filled rounded rectangle, or with `kind: "triangle"` a triangle that fills its `w × h` box pointing right (rotate the element for another direction; `radius` is ignored), drawn with `Graphics`, anchored top left. With `kind: "arc"` a stroke on the circle inscribed in the box, `min(w, h) − strokeWidth` across and centred, so the stroke stays inside the box: from 12 o'clock clockwise over `sweep` of the circle (clamped to 0..1; 0 draws nothing and leaves the build, 1 is a closed ring with no ends), ended by `cap` (`"round"` or `"butt"`), in `stroke`, `strokeWidth` and `alpha`; `sweep` and `cap` are optional: only an arc reads them; a rectangle or a triangle ignores them. It is stroked in segments as many as its angle needs (48 for a ring). An arc draws no fill and ignores `radius` and `dash`; its `clip` masks the children to its box. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape and the entity's children (see the alpha rule under "Layers, sort and lift"). `dash` above 0 dashes the stroke: dashes of `dash` reference units, gaps of half a dash, walking the straight edges and the rounded corners sampled as arcs (`sync/shape-path.ts`). `clip: true` masks the children of the entity to the shape, never the shape itself, so its stroke is drawn whole; the mask is always filled and never dashed. The path is built again only when a field it is drawn from changed: a still arc costs nothing a frame, a new `sweep` builds it once, a new `fill` does not build it. Motions tween only the numeric fields (`sweep` among them), never `kind` or `cap`. |
@@ -1610,7 +1610,7 @@ Overlay({ hud: "none", hudReturn: { delayMs: 1100, fadeMs: 400, parts: { gems: {
 - **Which parts.** Only the parts this overlay hid wait: every part with `hud: "none"`, the parts not in the list
   with a list. `"all"` and `"under"` hide none, and start no return.
 - **The clock.** Game time: the frame deltas the render phase receives, as the overlay's own `fade` (a `ui` tween)
-  counts. A part's return is 0 until its delay, then rises linearly to 1 over its fade; a fade of 0 shows it at
+  counts. A part's return is 0 until its delay, then rises to 1 over its fade, linearly without an `ease` (below); a fade of 0 shows it at
   once. A paused game holds it, `time.setScale(0.5)` takes it twice as long. A key of `parts` takes its own
   `delayMs` or `fadeMs`; a key not listed takes the overlay's, and a key the overlay keeps changes nothing.
 - **Together with the overlay.** A part is drawn at the overlays' factor times every return in progress: while the
@@ -1632,6 +1632,51 @@ Overlay({ hud: "none", hudReturn: { delayMs: 1100, fadeMs: 400, parts: { gems: {
 - **A dropped field.** A render that leaves `hudReturn` out of a live overlay's `Overlay` clears it on the entity
   (ui stores the value again without the key, see ui's "Extra components"): the next leave starts no return, and the
   `Overlay` stays in `world.ecs.snapshot()`.
+
+**Its motion (`ease`, `keyframes`, F245).** Two optional fields, at the top and in each key of `parts`, shape the
+return. `ease` is the curve of the fade: a name of `world`'s curves (`"out"`, `"inOutCubic"`, `"outBack"`, …) or a
+CSS `cubic-bezier` as four numbers. `keyframes` move the part over the same fade, from its first key to its rest pose,
+in the `Transform` keys of `defineMotion` (`dx`, `dy`, `rotation`, `scale`, `scaleX`, `scaleY`):
+
+```tsx
+// exam-in: the pills slide down 8 units to their place as they fade in.
+// alpha 0.596, 0.884, 0.979, 1 and y -3.23, -0.93, -0.17, 0 (from rest) at 1275, 1450, 1625, 1800 ms.
+Overlay({
+  hud: "none",
+  hudReturn: { delayMs: 1100, fadeMs: 700, ease: [0.25, 0.6, 0.3, 1], keyframes: [{ at: 0, Transform: { dy: -8 } }] }
+})
+```
+
+- **The curve.** Without `ease` the fade is linear: every number of F240 stays. The factor is an alpha, kept within
+  0..1: `inBack` starts below 0 and stands at 0, `outBack` is 1 early. A tuple is solved once by `anim`'s
+  `cubicBezier`, when the value changes; a frame reads its table. A curve that cannot be read (an unknown name, a
+  tuple that is not four finite numbers or with x1 or x2 outside 0..1, a number, an object, a function written from
+  JS) is linear; the rest of the value holds.
+- **The walk.** The part is posed at `u = (elapsed − delay) / fade`, as an enter of `defineMotion` walks its keys
+  (anim's "Keyframe motions"): before the first key's `at` it stands on the first key; between two keys it moves on
+  the curve of the key it goes to (the return's without one; the first key's own `ease` is never used); the last
+  segment runs from the last key to rest at `u = 1`. A key at `at: 1` only gives that segment its curve; its fields
+  are no pose. A field a key leaves out holds the previous key's value; a field a later key names first stands at
+  rest before it; a field no key names stays at rest. `dx`, `dy` (reference units) and `rotation` (radians) add to the
+  part's pose, `scale`, `scaleX`, `scaleY` multiply it. Before the delay the part holds the first key (at factor 0);
+  from `u = 1` on it is at rest exactly. An overshooting curve carries the pose past rest; only the alpha is clamped.
+  A fade of 0, and reduced motion, put the part at rest from its delay.
+- **Where it is drawn.** On the part's top display object (its wrapper when it has one), after its own `Transform`.
+  The ECS `Transform` is never written: layout, `rootPoseOf`, the game's hit boxes and snapshots never see the pose.
+  The part is at rest again at once when the walk ends, when the run ends or is cut (the same overlay showing
+  again, new layers), when the part leaves the HUD layer, and when its `HudPart` is removed.
+- **Bad keys.** `keyframes: []`, an `at` outside 0..1, keys not strictly ascending, a field that is no finite
+  number, or a key that is no object: no walk for that value (the top, or that key of `parts`); the fade still
+  runs. A part opts out of the overlay's walk only by its own keyframes.
+- **Inheritance.** A key of `parts` takes its own `ease` and `keyframes` when given, else the overlay's, each on its
+  own.
+- **Taps.** A part takes no tap while its factor is below 1 or while its walk still moves it: with `outBack` the
+  factor is 1 early, and the part takes a tap only once it stands at rest.
+- **No function.** `ease` takes no function and `keyframes` no `defineMotion` object: an `Overlay` is a component value
+  stored in the world, and the ECS snapshot and the frame history are JSON. The type refuses a function `ease`.
+- **Cost.** The same compare as the times: a new value equal to the old one, its curves and keys included, keeps the
+  copy. The curves are solved and the keys flattened only when the value changes; a frame of a walk samples the keys
+  by index into numbers and allocates nothing (`__tests__/perf/hud-return.perf.ts`, `walking` and `walkRewritten`).
 
 **The HUD under the veil (`hud: "under"`).** `Overlay({ dim: 0.82, dimColor: 0x1e161a, hud: "under" })`
 draws the whole HUD layer under the overlay's own dim, dimmed with everything else, every part kept
@@ -1672,7 +1717,10 @@ hit as before.
 `"under"`, kept and without effect), `renderer:overlay-value` (a value out of range, clamped; a `hold` or a
 `hudInert` that is no boolean reads as `false`; a value stored without `hudInert` is quiet),
 `renderer:overlay-hud-return-ignored` (a `hudReturn` that is no object of finite `delayMs` and `fadeMs`, or whose
-`parts` hold a value that is not, is read as absent; a negative time is clamped to 0 quietly). A refused
+`parts` hold a value that is not, is read as absent; a negative time is clamped to 0 quietly),
+`renderer:hud-return-ease` (an `ease` of `hudReturn` that cannot be read, drawn linear; `{ entity, label, part }`,
+`part` the key of `parts` it is in or `undefined` for the overlay's own), `renderer:hud-return-keys` (`keyframes`
+that cannot be read, no walk, the fade kept; the same fields), each once per overlay entity. A refused
 picture logs `renderer:overlay-live` at debug level and draws the range live. An agent build writes
 the `overlay` event line (`OverlayEventDetail`: `what` ∈ `open`, `landed`, `leave`, `gone`, `live`,
 `kept`).

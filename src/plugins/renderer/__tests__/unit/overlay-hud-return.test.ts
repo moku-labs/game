@@ -9,12 +9,7 @@ import {
   type OverlayValue,
   Transform
 } from "../../components";
-import {
-  clampedReturn,
-  returnFactor,
-  samplePose,
-  sameReturn
-} from "../../sync/overlay-return";
+import { clampedReturn, returnFactor, sameReturn, samplePose } from "../../sync/overlay-return";
 import type { ClampedHudReturn } from "../../sync/types";
 import { endStage, OVERLAY_LAYERS, type OverlayStage, startOverlayStage } from "../overlay-harness";
 
@@ -865,7 +860,10 @@ describe("F245: the copy of ease and keyframes", () => {
     const copy = copyOf({
       delayMs: 0,
       fadeMs: 100,
-      keyframes: [{ at: 0, Transform: { dy: -8 } }, { at: 0.5, ease: "bounce", Transform: { dy: 0 } }]
+      keyframes: [
+        { at: 0, Transform: { dy: -8 } },
+        { at: 0.5, ease: "bounce", Transform: { dy: 0 } }
+      ]
     });
 
     expect([copy.badEase, copy.badKeys, copy.keys?.count]).toEqual([true, false, 2]);
@@ -958,7 +956,10 @@ describe("F245: the pose of a walk", () => {
     const track: HudReturn = {
       delayMs: 0,
       fadeMs: 100,
-      keyframes: [{ at: 0, Transform: { dy: -8 } }, { at: 1, ease: "in", Transform: { dy: 50 } }]
+      keyframes: [
+        { at: 0, Transform: { dy: -8 } },
+        { at: 1, ease: "in", Transform: { dy: 50 } }
+      ]
     };
 
     // Halfway on "in": a quarter of the way from -8 to rest.
@@ -971,7 +972,10 @@ describe("F245: the pose of a walk", () => {
     const track: HudReturn = {
       delayMs: 0,
       fadeMs: 100,
-      keyframes: [{ at: 0.5, Transform: { dy: -8 } }, { at: 0.75, Transform: { scale: 0.8 } }]
+      keyframes: [
+        { at: 0.5, Transform: { dy: -8 } },
+        { at: 0.75, Transform: { scale: 0.8 } }
+      ]
     };
 
     expect(poseAt(track, 0.25)).toEqual([0, -8, 0, 1, 1, 1]);
@@ -990,13 +994,13 @@ describe("F245: the pose of a walk", () => {
   });
 });
 
-describe("F245: the same value with ease and keyframes", () => {
-  /**
-   * A value with a curve and keys at the top and in `parts`, new at each call.
-   *
-   * @returns The value.
-   */
-  const written = (): HudReturn => ({
+/**
+ * A value with a curve and keys at the top and in `parts`, new at each call.
+ *
+ * @returns The value.
+ */
+function written(): HudReturn {
+  return {
     delayMs: 1100,
     fadeMs: 700,
     ease: [0.25, 0.6, 0.3, 1],
@@ -1005,9 +1009,20 @@ describe("F245: the same value with ease and keyframes", () => {
       { at: 0.5, ease: "out", Transform: { dy: -2 } }
     ],
     parts: { gems: { ease: "inCubic", keyframes: [{ at: 0, Transform: { dx: 4 } }] } }
-  });
-  const keys = (value: HudReturn): readonly HudReturnKey[] => value.keyframes ?? [];
+  };
+}
 
+/**
+ * The overlay's own keys of a value.
+ *
+ * @param value - The value.
+ * @returns Its keys, none without.
+ */
+function keys(value: HudReturn): readonly HudReturnKey[] {
+  return value.keyframes ?? [];
+}
+
+describe("F245: the same value with ease and keyframes", () => {
   // Bug: an inline literal written again is copied again: a curve solved and keys flattened every render.
   it("is the same for an equal value written again", () => {
     expect(sameReturn(written(), written())).toBe(true);
@@ -1019,23 +1034,38 @@ describe("F245: the same value with ease and keyframes", () => {
     ["a name for the tuple", value => ({ ...value, ease: "out" })],
     [
       "a key's at",
-      value => ({ ...value, keyframes: [{ at: 0.1, Transform: { dy: -8 } }, ...keys(value).slice(1)] })
+      value => ({
+        ...value,
+        keyframes: [{ at: 0.1, Transform: { dy: -8 } }, ...keys(value).slice(1)]
+      })
     ],
     [
       "a key's dy",
-      value => ({ ...value, keyframes: [{ at: 0, Transform: { dy: -12 } }, ...keys(value).slice(1)] })
+      value => ({
+        ...value,
+        keyframes: [{ at: 0, Transform: { dy: -12 } }, ...keys(value).slice(1)]
+      })
     ],
     [
       "a key's ease",
-      value => ({ ...value, keyframes: [keys(value)[0] ?? { at: 0 }, { at: 0.5, ease: "in", Transform: { dy: -2 } }] })
+      value => ({
+        ...value,
+        keyframes: [keys(value)[0] ?? { at: 0 }, { at: 0.5, ease: "in", Transform: { dy: -2 } }]
+      })
     ],
     [
       "the keys of a part",
-      value => ({ ...value, parts: { gems: { ease: "inCubic", keyframes: [{ at: 0, Transform: { dx: 6 } }] } } })
+      value => ({
+        ...value,
+        parts: { gems: { ease: "inCubic", keyframes: [{ at: 0, Transform: { dx: 6 } }] } }
+      })
     ],
     [
       "the curve of a part",
-      value => ({ ...value, parts: { gems: { ease: "in", keyframes: [{ at: 0, Transform: { dx: 4 } }] } } })
+      value => ({
+        ...value,
+        parts: { gems: { ease: "in", keyframes: [{ at: 0, Transform: { dx: 4 } }] } }
+      })
     ],
     [
       "no keyframes",
@@ -1102,7 +1132,10 @@ describe("F245: the walk on the stage", () => {
 
   // Bug: a cut run leaves the part where its walk stood: the same overlay shown again, a new scene.
   it.each<[string, (stage: OverlayStage, splash: Entity) => void]>([
-    ["the same overlay showing again", (stage, splash) => stage.drawn.mock.world.ecs.untag(splash, Exiting)],
+    [
+      "the same overlay showing again",
+      (stage, splash) => stage.drawn.mock.world.ecs.untag(splash, Exiting)
+    ],
     ["new layers", stage => stage.drawn.mock.world.projection.setLayers([...OVERLAY_LAYERS])]
   ])("puts the part at rest at once for %s mid-walk", async (_name, cut) => {
     const { stage, energy } = await returnStage();
@@ -1212,7 +1245,9 @@ describe("F245: the walk on the stage", () => {
       ["renderer:hud-return-ease", { entity: splash, label: expect.any(String), part: undefined }],
       ["renderer:hud-return-keys", { entity: splash, label: expect.any(String), part: "gems" }]
     ]);
-    expect(warn.mock.calls.some(([code]) => code === "renderer:overlay-hud-return-ignored")).toBe(false);
+    expect(warn.mock.calls.some(([code]) => code === "renderer:overlay-hud-return-ignored")).toBe(
+      false
+    );
     // Linear halfway; the energy walks the overlay's keys, the gems' own bad keys walk nothing.
     expect([factor(stage, energy), factor(stage, gems)]).toEqual([0.5, 0.5]);
     expect([topY(stage, energy), topY(stage, gems)]).toEqual([96, 100]);

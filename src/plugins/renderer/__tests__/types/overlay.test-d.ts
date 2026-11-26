@@ -172,7 +172,12 @@ kit.Overlay({
     delayMs: 1100,
     fadeMs: 700,
     ease: "outCubic",
-    parts: { gems: { ease: [0.25, 0.6, 0.3, 1], keyframes: [{ at: 0.5, ease: "in", Transform: { scale: 0.8 } }] } }
+    parts: {
+      gems: {
+        ease: [0.25, 0.6, 0.3, 1],
+        keyframes: [{ at: 0.5, ease: "in", Transform: { scale: 0.8 } }]
+      }
+    }
   }
 });
 
@@ -182,8 +187,10 @@ Overlay({ hudReturn: { delayMs: 1100, fadeMs: 700, ease: (t: number) => t } });
 // @ts-expect-error — "bounce" is no curve of the engine.
 Overlay({ hudReturn: { delayMs: 1100, fadeMs: 700, ease: "bounce" } });
 
-// @ts-expect-error — a key's Transform moves in x, y, turn and scale; there is no dz.
-Overlay({ hudReturn: { delayMs: 1100, fadeMs: 700, keyframes: [{ at: 0, Transform: { dz: 1 } }] } });
+Overlay({
+  // @ts-expect-error — a key's Transform moves in x, y, turn and scale; there is no dz.
+  hudReturn: { delayMs: 1100, fadeMs: 700, keyframes: [{ at: 0, Transform: { dz: 1 } }] }
+});
 
 // @ts-expect-error — a key needs its at.
 Overlay({ hudReturn: { delayMs: 1100, fadeMs: 700, keyframes: [{ Transform: { dy: -8 } }] } });

@@ -580,8 +580,8 @@ function motionReturn(delayMs: number, fadeMs: number): HudReturn {
     fadeMs,
     ease: "outCubic",
     keyframes: [
-      { at: 0, Transform: { dy: -8, scale: 2 } },
-      { at: 0.5, ease: "out", Transform: { dy: -2, rotation: 1 } },
+      { at: 0, Transform: { dy: -8, scale: 0.9 } },
+      { at: 0.5, ease: "out", Transform: { dy: -2, rotation: 0.05 } },
       { at: 1, ease: "inOutCubic" }
     ],
     parts: {
@@ -644,8 +644,7 @@ export async function returnBoard(moment: ReturnMoment): Promise<ReturnBoard> {
   const stage = await startOverlayStage();
   const { mock } = stage.drawn;
   const { sync, host, viewport, demand, kept } = mock.modules;
-  const isStanding =
-    moment === "standing" || moment === "rewritten" || moment === "walkRewritten";
+  const isStanding = moment === "standing" || moment === "rewritten" || moment === "walkRewritten";
 
   for (let index = 0; index < 20; index += 1) {
     stage.view({ layer: "scene", x: (index % 5) * 200, y: Math.floor(index / 5) * 200 });

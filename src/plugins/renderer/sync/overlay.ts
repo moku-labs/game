@@ -4,7 +4,7 @@
  * decision (spec 22 O5–O10). A game without an overlay and a HUD part pays one size check.
  */
 import type { Entity, LayerSpec } from "../../world/types";
-import { HudPart, Overlay, OverlayLevel, type OverlayValue } from "../components";
+import { HudPart, Overlay, OverlayLevel, type OverlayValue, Transform } from "../components";
 import type { OverlayEventDetail, PixiContainer, PixiModule } from "../types";
 import { dropUnder, dropUnders, stepDims, stepHold, stepParts } from "./overlay-look";
 import { clearRange, rangeHolds, stepRange } from "./overlay-range";
@@ -19,7 +19,6 @@ import {
   stepReturns
 } from "./overlay-return";
 import { isLeaving, parentOf } from "./pose";
-import { applyHudPose } from "./views";
 import type {
   ActiveRange,
   OverlayEventSink,
@@ -31,6 +30,7 @@ import type {
   SyncCtx,
   SyncState
 } from "./types";
+import { applyHudPose, writeHudPose } from "./views";
 
 /** How deep a `Parent` chain or a walk up the tree goes. */
 const MAX_DEPTH = 32;
@@ -718,7 +718,8 @@ export function drainOverlayEvents(sctx: SyncCtx, monitor: OverlayEventSink): vo
 
 /**
  * Lets a part go that lost its `HudPart` (F245): a view it still has is put at rest at once, so a walk it was in leaves
- * no pose on it; its alpha keeps what F240 left it.
+ * no pose on it; its alpha keeps what F240 left it. An entity being despawned may have lost its `Transform` first: its
+ * view, about to be released, only has its pose numbers put at rest, and nothing is drawn on it.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The part that left.
@@ -728,7 +729,18 @@ function leavePart(sctx: SyncCtx, entity: Entity): void {
   const view = state.views.get(entity);
 
   state.overlay.parts.delete(entity);
-  if (view !== undefined) applyHudPose(sctx, entity, view, HUD_REST);
+  if (view === undefined) return;
+
+  view.hudWalking = false;
+
+  if (sctx.ctx.deps.world.ecs.get(entity, Transform) !== undefined) {
+    applyHudPose(sctx, entity, view, HUD_REST);
+
+    return;
+  }
+
+  writeHudPose(view, HUD_REST);
+  view.hudTurned = false;
 }
 
 /**
