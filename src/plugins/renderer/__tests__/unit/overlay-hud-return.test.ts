@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Exiting } from "../../../world/ecs/define";
+import { Exiting, Layer } from "../../../world/ecs/define";
 import type { Entity } from "../../../world/types";
-import { HudPart, type HudReturn, Overlay, type OverlayValue } from "../../components";
+import {
+  HudPart,
+  type HudReturn,
+  type HudReturnKey,
+  Overlay,
+  type OverlayValue,
+  Transform
+} from "../../components";
+import { clampedReturn, returnFactor, sameReturn, samplePose } from "../../sync/overlay-return";
+import type { ClampedHudReturn } from "../../sync/types";
 import { endStage, OVERLAY_LAYERS, type OverlayStage, startOverlayStage } from "../overlay-harness";
 
 // ---------------------------------------------------------------------------
@@ -719,5 +728,564 @@ describe("the hudReturn value", () => {
     stage.frame();
 
     expect(factor(stage, energy)).toBe(0.5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F245: `hudReturn` takes a curve (`ease`) and a walk (`keyframes`). The curve shapes the factor, kept within 0..1; the
+// walk poses each held part from its first key to rest over the fade, drawn on its top, never in its `Transform`.
+// ---------------------------------------------------------------------------
+
+/** exam-in of the game's motion table: 8 units above, down to rest over 700 ms on cubic-bezier(.25, .6, .3, 1). */
+const EXAM_IN: HudReturn = {
+  delayMs: 1100,
+  fadeMs: 700,
+  ease: [0.25, 0.6, 0.3, 1],
+  keyframes: [{ at: 0, Transform: { dy: -8 } }]
+};
+
+/** The precision of a value read on the engine's bezier table, which is within 1e-4 of the exact curve. */
+const CURVE_DIGITS = 3;
+
+/**
+ * The clamped copy of a value that can be read.
+ *
+ * @param value - The value.
+ * @returns Its copy.
+ */
+function copyOf(value: unknown): ClampedHudReturn {
+  const copy = clampedReturn(value);
+
+  if (copy === undefined) throw new Error("the value cannot be read");
+
+  return copy;
+}
+
+/**
+ * The pose a value's own walk stands at, at a share of its fade.
+ *
+ * @param value - The value, with readable keys.
+ * @param share - The share of the fade.
+ * @returns The six numbers: dx, dy, rotation, scale, scaleX, scaleY.
+ */
+function poseAt(value: HudReturn, share: number): number[] {
+  const copy = copyOf(value);
+  const pose = new Float64Array(6);
+
+  if (copy.keys === undefined) throw new Error("the value has no walk");
+
+  samplePose(copy.keys, copy.curve, share, pose);
+
+  return [...pose];
+}
+
+/**
+ * Where the top of a part's view stands now.
+ *
+ * @param stage - The stage.
+ * @param entity - The part.
+ * @returns Its y.
+ */
+function topY(stage: OverlayStage, entity: Entity): number {
+  return stage.topOf(entity).position.y;
+}
+
+describe("F245: the curve of the return factor", () => {
+  // Bug: the curve is ignored (0.25, 0.5, 0.75 drawn), or a tuple is solved with its numbers in another order.
+  it.each([
+    [1100, 0],
+    [1275, 0.596],
+    [1450, 0.884],
+    [1625, 0.979],
+    [1800, 1]
+  ])("draws exam-in at %i ms with %d", (elapsed, expected) => {
+    const { curve } = copyOf(EXAM_IN);
+
+    expect(returnFactor(elapsed, 1100, 700, curve)).toBeCloseTo(expected, CURVE_DIGITS);
+  });
+
+  // Bug: a value without `ease` gets a default curve that is not linear: every F240 number moves.
+  it("stays linear without ease: 0.25 and 0.5 a quarter and half into the fade", () => {
+    const { curve } = copyOf({ delayMs: 1100, fadeMs: 700 });
+
+    expect([returnFactor(1275, 1100, 700, curve), returnFactor(1450, 1100, 700, curve)]).toEqual([
+      0.25, 0.5
+    ]);
+  });
+
+  // Bug: an overshooting curve reaches the alpha unclamped: a negative alpha, or one above 1.
+  it("keeps the factor within 0..1: inBack at 0.1 is 0, outBack at 0.5 is 1", () => {
+    const inBack = copyOf({ delayMs: 0, fadeMs: 100, ease: "inBack" }).curve;
+    const outBack = copyOf({ delayMs: 0, fadeMs: 100, ease: "outBack" }).curve;
+
+    expect([returnFactor(10, 0, 100, inBack), returnFactor(50, 0, 100, outBack)]).toEqual([0, 1]);
+  });
+});
+
+describe("F245: the copy of ease and keyframes", () => {
+  // Bug: a named curve is read as linear, or kept as something `easeCell` does not know.
+  it("eases by a name: outCubic is 0.875 halfway", () => {
+    const copy = copyOf({ delayMs: 0, fadeMs: 100, ease: "outCubic" });
+
+    expect([copy.curve, copy.badEase, returnFactor(50, 0, 100, copy.curve)]).toEqual([
+      { name: "outCubic" },
+      false,
+      0.875
+    ]);
+  });
+
+  // Bug: a curve that cannot be read throws (cubicBezier refuses x1 1.2), drops the whole value, or is kept.
+  it.each<[string, unknown]>([
+    ["x1 1.2", [1.2, 0, 0.3, 1]],
+    ["x2 below 0", [0.25, 0.6, -0.1, 1]],
+    ["three numbers", [0.25, 0.6, 0.3]],
+    ["a NaN y", [0.25, Number.NaN, 0.3, 1]],
+    ["a number", 0.5],
+    ["a function", (t: number) => t],
+    ["an unknown name", "bounce"]
+  ])("reads %s as linear and notes it, the times kept", (_name, ease) => {
+    const copy = copyOf({ delayMs: 100, fadeMs: 700, ease });
+
+    expect([copy.badEase, copy.badEasePart, copy.delayMs, copy.fadeMs]).toEqual([
+      true,
+      undefined,
+      100,
+      700
+    ]);
+    expect(returnFactor(450, 100, 700, copy.curve)).toBe(0.5);
+  });
+
+  // Bug: a key's curve that cannot be read drops the walk, or passes unnoted.
+  it("reads a key's curve that cannot be read as linear, the walk kept", () => {
+    const copy = copyOf({
+      delayMs: 0,
+      fadeMs: 100,
+      keyframes: [
+        { at: 0, Transform: { dy: -8 } },
+        { at: 0.5, ease: "bounce", Transform: { dy: 0 } }
+      ]
+    });
+
+    expect([copy.badEase, copy.badKeys, copy.keys?.count]).toEqual([true, false, 2]);
+  });
+
+  // Bug: keys that cannot be read are walked (NaN poses, a walk backwards), or they cut the fade as well.
+  it.each<[string, unknown]>([
+    ["no key", []],
+    ["keys out of order", [{ at: 0.5 }, { at: 0.25 }]],
+    ["two keys at one at", [{ at: 0.5 }, { at: 0.5 }]],
+    ["an at of 1.5", [{ at: 1.5 }]],
+    ["a NaN dy", [{ at: 0, Transform: { dy: Number.NaN } }]],
+    ["a key that is text", ["soon"]],
+    ["a Transform that is text", [{ at: 0, Transform: "up" }]],
+    ["keys that are no list", { at: 0 }]
+  ])("walks nothing for %s and notes it, the fade kept", (_name, keyframes) => {
+    const copy = copyOf({ delayMs: 100, fadeMs: 700, keyframes });
+
+    expect([copy.badKeys, copy.badKeysPart, copy.keys, copy.fadeMs]).toEqual([
+      true,
+      undefined,
+      undefined,
+      700
+    ]);
+  });
+
+  // Bug: a key of `parts` without its own curve or keys walks linear and still (the overlay's lost), or one with its
+  // own takes the overlay's anyway; or a bad part's keys are blamed on the overlay.
+  it("gives a key of parts its own ease and keyframes, and the overlay's to a key without them", () => {
+    const copy = copyOf({
+      delayMs: 0,
+      fadeMs: 100,
+      ease: "in",
+      keyframes: [{ at: 0, Transform: { dy: -8 } }],
+      parts: {
+        gems: { ease: "out", keyframes: [{ at: 0, Transform: { dx: 5 } }] },
+        stars: { delayMs: 50 },
+        coins: { keyframes: [] }
+      }
+    });
+    const gems = copy.parts?.get("gems");
+    const stars = copy.parts?.get("stars");
+    const pose = new Float64Array(6);
+
+    expect(gems?.curve).toEqual({ name: "out" });
+    expect([stars?.curve, stars?.keys]).toEqual([copy.curve, copy.keys]);
+    expect(stars?.keys).toBe(copy.keys);
+
+    if (gems?.keys === undefined) throw new Error("gems has no walk");
+
+    samplePose(gems.keys, gems.curve, 0, pose);
+    expect([pose[0], pose[1]]).toEqual([5, 0]);
+    expect([copy.badKeys, copy.badKeysPart, copy.parts?.get("coins")?.keys]).toEqual([
+      true,
+      "coins",
+      undefined
+    ]);
+  });
+});
+
+describe("F245: the pose of a walk", () => {
+  // Bug: the walk starts at rest, or is not on the return's curve, or ends off rest.
+  it("walks exam-in from -8 at its start to -0.93 halfway and 0 at its end", () => {
+    expect(poseAt(EXAM_IN, 0)).toEqual([0, -8, 0, 1, 1, 1]);
+    expect(poseAt(EXAM_IN, 0.5)[1]).toBeCloseTo(-0.93, 2);
+    expect(poseAt(EXAM_IN, 1)).toEqual([0, 0, 0, 1, 1, 1]);
+  });
+
+  // Bug: before its first `at` the part walks from rest; a segment eases by the key it starts on or the return's curve;
+  // the last segment does not go to rest.
+  it("holds the first key before its at, eases a segment by its end key, and runs the last one to rest", () => {
+    const track: HudReturn = {
+      delayMs: 0,
+      fadeMs: 100,
+      keyframes: [
+        { at: 0.25, Transform: { dy: -10 } },
+        { at: 0.75, ease: "in", Transform: { dy: 10 } }
+      ]
+    };
+
+    expect(poseAt(track, 0.1)[1]).toBe(-10);
+    // Halfway from 0.25 to 0.75 on "in": 0.25 of the way, -10 + 20 × 0.25.
+    expect(poseAt(track, 0.5)[1]).toBe(-5);
+    // Halfway from the last key to rest on the return's own linear curve.
+    expect(poseAt(track, 0.875)[1]).toBe(5);
+  });
+
+  // Bug: a key at 1 is walked to as a pose (the part ends 50 off), or its curve is lost.
+  it("takes a key at 1 for the last segment's curve, not for a pose", () => {
+    const track: HudReturn = {
+      delayMs: 0,
+      fadeMs: 100,
+      keyframes: [
+        { at: 0, Transform: { dy: -8 } },
+        { at: 1, ease: "in", Transform: { dy: 50 } }
+      ]
+    };
+
+    // Halfway on "in": a quarter of the way from -8 to rest.
+    expect(poseAt(track, 0.5)[1]).toBe(-6);
+    expect(poseAt(track, 0.999)[1]).toBeLessThan(0);
+  });
+
+  // Bug: a field a later key names first stands on its value from the start, or as 0 (a scale of 0 hides the part).
+  it("keeps a field at rest before the key that first names it, then walks it there", () => {
+    const track: HudReturn = {
+      delayMs: 0,
+      fadeMs: 100,
+      keyframes: [
+        { at: 0.5, Transform: { dy: -8 } },
+        { at: 0.75, Transform: { scale: 0.8 } }
+      ]
+    };
+
+    expect(poseAt(track, 0.25)).toEqual([0, -8, 0, 1, 1, 1]);
+    // Halfway from 0.5 to 0.75: the scale halfway from rest to 0.8, the offset the first key's, held.
+    expect(poseAt(track, 0.625)[1]).toBe(-8);
+    expect(poseAt(track, 0.625)[3]).toBeCloseTo(0.9, 12);
+  });
+
+  // Bug: the pose is clamped with the factor, so an overshooting walk stops at rest.
+  it("carries the pose past rest on outBack while the factor stays at 1", () => {
+    const overshoot: HudReturn = { ...EXAM_IN, delayMs: 0, fadeMs: 100, ease: "outBack" };
+    const copy = copyOf(overshoot);
+
+    expect(poseAt(overshoot, 0.5)[1]).toBeGreaterThan(0);
+    expect(returnFactor(50, 0, 100, copy.curve)).toBe(1);
+  });
+});
+
+/**
+ * A value with a curve and keys at the top and in `parts`, new at each call.
+ *
+ * @returns The value.
+ */
+function written(): HudReturn {
+  return {
+    delayMs: 1100,
+    fadeMs: 700,
+    ease: [0.25, 0.6, 0.3, 1],
+    keyframes: [
+      { at: 0, Transform: { dy: -8 } },
+      { at: 0.5, ease: "out", Transform: { dy: -2 } }
+    ],
+    parts: { gems: { ease: "inCubic", keyframes: [{ at: 0, Transform: { dx: 4 } }] } }
+  };
+}
+
+/**
+ * The overlay's own keys of a value.
+ *
+ * @param value - The value.
+ * @returns Its keys, none without.
+ */
+function keys(value: HudReturn): readonly HudReturnKey[] {
+  return value.keyframes ?? [];
+}
+
+describe("F245: the same value with ease and keyframes", () => {
+  // Bug: an inline literal written again is copied again: a curve solved and keys flattened every render.
+  it("is the same for an equal value written again", () => {
+    expect(sameReturn(written(), written())).toBe(true);
+  });
+
+  // Bug: a change in a curve or a key keeps the old copy, so the part walks the old motion.
+  it.each<[string, (value: HudReturn) => HudReturn]>([
+    ["a number of the tuple", value => ({ ...value, ease: [0.25, 0.6, 0.35, 1] })],
+    ["a name for the tuple", value => ({ ...value, ease: "out" })],
+    [
+      "a key's at",
+      value => ({
+        ...value,
+        keyframes: [{ at: 0.1, Transform: { dy: -8 } }, ...keys(value).slice(1)]
+      })
+    ],
+    [
+      "a key's dy",
+      value => ({
+        ...value,
+        keyframes: [{ at: 0, Transform: { dy: -12 } }, ...keys(value).slice(1)]
+      })
+    ],
+    [
+      "a key's ease",
+      value => ({
+        ...value,
+        keyframes: [keys(value)[0] ?? { at: 0 }, { at: 0.5, ease: "in", Transform: { dy: -2 } }]
+      })
+    ],
+    [
+      "the keys of a part",
+      value => ({
+        ...value,
+        parts: { gems: { ease: "inCubic", keyframes: [{ at: 0, Transform: { dx: 6 } }] } }
+      })
+    ],
+    [
+      "the curve of a part",
+      value => ({
+        ...value,
+        parts: { gems: { ease: "in", keyframes: [{ at: 0, Transform: { dx: 4 } }] } }
+      })
+    ],
+    [
+      "no keyframes",
+      value => ({ delayMs: 1100, fadeMs: 700, ease: [0.25, 0.6, 0.3, 1], parts: value.parts ?? {} })
+    ],
+    ["a key more", value => ({ ...value, keyframes: [...keys(value), { at: 0.8 }] })]
+  ])("is not the same with %s changed", (_name, change) => {
+    expect(sameReturn(change(written()), written())).toBe(false);
+  });
+});
+
+describe("F245: the walk on the stage", () => {
+  // Bug: the pose is written into the ECS Transform (layout and snapshots move), drawn on another node, or the alpha
+  // is not on the curve (the oracle of every frame compares it with the run's own curve).
+  it("draws exam-in on the part's top: rest - 8 at 1100 ms, on the curve, rest from 1800 ms; its Transform stays", async () => {
+    const { stage, energy } = await returnStage();
+    const ecs = stage.drawn.mock.world.ecs;
+    const splash = shown(stage, { hud: "none", hudReturn: EXAM_IN });
+
+    leaveAndGo(stage, splash);
+    step(stage, 1100);
+    expect([topY(stage, energy), factor(stage, energy)]).toEqual([92, 0]);
+
+    step(stage, 175);
+    expect(topY(stage, energy)).toBeCloseTo(100 - 3.23, 2);
+    expect(factor(stage, energy)).toBeCloseTo(0.596, CURVE_DIGITS);
+
+    step(stage, 175);
+    expect(topY(stage, energy)).toBeCloseTo(100 - 0.93, 2);
+    expect(factor(stage, energy)).toBeCloseTo(0.884, CURVE_DIGITS);
+
+    step(stage, 350);
+    expect([topY(stage, energy), factor(stage, energy)]).toEqual([100, 1]);
+    step(stage, 16);
+    expect(topY(stage, energy)).toBe(100);
+    expect(ecs.get(energy, Transform)?.y).toBe(100);
+  });
+
+  // Bug: reduced motion keeps the walk (the part slides in), or cuts the delay too.
+  it("stands at rest at alpha 1 from the delay under reduced motion, on its first key before it", async () => {
+    const { stage, energy } = await returnStage();
+    const splash = shown(stage, { hud: "none", hudReturn: EXAM_IN });
+
+    stage.drawn.mock.api.sync.leave.setReducedMotion(true);
+    leaveAndGo(stage, splash);
+    step(stage, 1099);
+    expect([topY(stage, energy), factor(stage, energy)]).toEqual([92, 0]);
+    step(stage, 1);
+    expect([topY(stage, energy), factor(stage, energy)]).toEqual([100, 1]);
+  });
+
+  // Bug: a fade of 0 divides by zero (a NaN pose) or walks a frame past the delay.
+  it("stands at rest from the delay with a fade of 0", async () => {
+    const { stage, energy } = await returnStage();
+    const late = { ...EXAM_IN, fadeMs: 0, parts: { stars: { delayMs: 5000 } } };
+    const splash = shown(stage, { hud: "none", hudReturn: late });
+
+    leaveAndGo(stage, splash);
+    step(stage, 1099);
+    expect(topY(stage, energy)).toBe(92);
+    step(stage, 1);
+    expect(topY(stage, energy)).toBe(100);
+  });
+
+  // Bug: a cut run leaves the part where its walk stood: the same overlay shown again, a new scene.
+  it.each<[string, (stage: OverlayStage, splash: Entity) => void]>([
+    [
+      "the same overlay showing again",
+      (stage, splash) => stage.drawn.mock.world.ecs.untag(splash, Exiting)
+    ],
+    ["new layers", stage => stage.drawn.mock.world.projection.setLayers([...OVERLAY_LAYERS])]
+  ])("puts the part at rest at once for %s mid-walk", async (_name, cut) => {
+    const { stage, energy } = await returnStage();
+    const splash = shown(stage, { hud: "none", hudReturn: EXAM_IN });
+
+    stage.leave(splash);
+    stage.level(splash, 0.5);
+    stage.frame();
+    step(stage, 1450);
+    expect(topY(stage, energy)).toBeLessThan(100);
+
+    cut(stage, splash);
+    stage.frame();
+    expect(topY(stage, energy)).toBe(100);
+  });
+
+  // Bug: a part that leaves the HUD mid-walk keeps its offset for good: nothing writes it again.
+  it("puts a part at rest when it loses HudPart mid-walk, and when it moves out of the HUD layer", async () => {
+    const { stage, energy, gems } = await returnStage();
+    const ecs = stage.drawn.mock.world.ecs;
+    const splash = shown(stage, { hud: "none", hudReturn: EXAM_IN });
+
+    leaveAndGo(stage, splash);
+    step(stage, 1450);
+    expect([topY(stage, energy), topY(stage, gems)].every(y => y < 100)).toBe(true);
+
+    ecs.remove(energy, HudPart);
+    expect(topY(stage, energy)).toBe(100);
+
+    ecs.set(gems, Layer, { name: "ui" });
+    step(stage, 16);
+    expect([topY(stage, energy), topY(stage, gems)]).toEqual([100, 100]);
+  });
+
+  // Bug: a move of the part's own Transform writes its top without the walk's offset, and a pose that stands still
+  // (the first key held through the delay) is never drawn again: the part jumps to its rest place mid-walk.
+  it("keeps the walk's offset on a part whose Transform moves while its first key is held", async () => {
+    const { stage, energy } = await returnStage();
+    const ecs = stage.drawn.mock.world.ecs;
+    const splash = shown(stage, { hud: "none", hudReturn: EXAM_IN });
+
+    leaveAndGo(stage, splash);
+    step(stage, 500);
+    expect(topY(stage, energy)).toBe(92);
+
+    ecs.set(energy, Transform, { y: 140 });
+    step(stage, 16);
+    expect(topY(stage, energy)).toBe(132);
+  });
+
+  // Bug: the last run's pose wins over the others, or the scale is added instead of multiplied with the part's own.
+  it("adds the offsets of two runs that hold a part, and multiplies a scale with the part's own", async () => {
+    const { stage, energy } = await returnStage();
+    const ecs = stage.drawn.mock.world.ecs;
+
+    ecs.set(energy, Transform, { scale: 2 });
+
+    const splash = shown(stage, { hud: "none", hudReturn: EXAM_IN }, 2);
+    const sheet = shown(
+      stage,
+      {
+        hud: "none",
+        hudReturn: { ...EXAM_IN, keyframes: [{ at: 0, Transform: { dy: -4, scale: 0.8 } }] }
+      },
+      3
+    );
+
+    stage.leave(splash);
+    stage.leave(sheet);
+    stage.frame();
+    ecs.despawn(splash);
+    ecs.despawn(sheet);
+    stage.frame();
+
+    expect(topY(stage, energy)).toBe(88);
+    expect(stage.topOf(energy).scale.x).toBeCloseTo(1.6, 12);
+    expect(ecs.get(energy, Transform)?.scale).toBe(2);
+  });
+
+  // Bug: a part at factor 1 takes a tap while its walk still moves it (outBack is at 1 early).
+  it("gives a part still walking on outBack no tap at factor 1, and a tap once at rest", async () => {
+    const { stage, energy } = await returnStage();
+    const sync = stage.drawn.mock.api.sync;
+    const tap = (): Entity | undefined => sync.hitTest(150, 150, entity => entity === energy);
+    const value: HudReturn = { ...EXAM_IN, delayMs: 0, fadeMs: 200, ease: "outBack" };
+    const splash = shown(stage, { hud: "none", hudReturn: value });
+
+    leaveAndGo(stage, splash);
+    step(stage, 100);
+    expect(factor(stage, energy)).toBe(1);
+    expect(topY(stage, energy)).not.toBe(100);
+    expect(overlayOf(stage).offTops.has(stage.topOf(energy))).toBe(true);
+    expect(tap()).toBeUndefined();
+
+    step(stage, 100);
+    expect(topY(stage, energy)).toBe(100);
+    expect(tap()).toBe(energy);
+  });
+
+  // Bug: a bad curve or bad keys pass silently, warn every frame, are taken for an unreadable value (no return at all),
+  // or the curve is not linear.
+  it("warns once per overlay for a bad curve and for bad keys, and returns linear with no walk", async () => {
+    const { stage, energy, gems } = await returnStage({ dev: true });
+    const warn = vi.spyOn(stage.drawn.mock.log, "warn");
+    const bad = {
+      delayMs: 0,
+      fadeMs: 700,
+      ease: [1.2, 0, 0.3, 1],
+      keyframes: [{ at: 0, Transform: { dy: -8 } }],
+      parts: { gems: { keyframes: [] } }
+    } as const;
+    const splash = shown(stage, { hud: "none", hudReturn: bad });
+    const codes = new Set(["renderer:hud-return-ease", "renderer:hud-return-keys"]);
+
+    stage.drawn.mock.world.ecs.set(splash, Overlay, {
+      hudReturn: { ...bad, ease: [1.3, 0, 0.3, 1] }
+    });
+    stage.frames(2);
+    leaveAndGo(stage, splash);
+    step(stage, 350);
+
+    expect(warn.mock.calls.filter(([code]) => codes.has(code))).toEqual([
+      ["renderer:hud-return-ease", { entity: splash, label: expect.any(String), part: undefined }],
+      ["renderer:hud-return-keys", { entity: splash, label: expect.any(String), part: "gems" }]
+    ]);
+    expect(warn.mock.calls.some(([code]) => code === "renderer:overlay-hud-return-ignored")).toBe(
+      false
+    );
+    // Linear halfway; the energy walks the overlay's keys, the gems' own bad keys walk nothing.
+    expect([factor(stage, energy), factor(stage, gems)]).toEqual([0.5, 0.5]);
+    expect([topY(stage, energy), topY(stage, gems)]).toEqual([96, 100]);
+  });
+
+  // Bug: a bad curve of a key of `parts` is blamed on the overlay (no part in the warning), turns the overlay's own
+  // curve linear for every part, or is kept on that part.
+  it("names the key of parts with a bad curve, draws that part linear and the others on the overlay's", async () => {
+    const { stage, energy, gems } = await returnStage({ dev: true });
+    const warn = vi.spyOn(stage.drawn.mock.log, "warn");
+    const value = { delayMs: 0, fadeMs: 700, ease: "in", parts: { gems: { ease: "bounce" } } };
+    const splash = shown(stage, { hud: "none", hudReturn: value as HudReturn });
+
+    expect(copyOf(value).badEasePart).toBe("gems");
+
+    leaveAndGo(stage, splash);
+    step(stage, 350);
+
+    expect(warn.mock.calls.filter(([code]) => code === "renderer:hud-return-ease")).toEqual([
+      ["renderer:hud-return-ease", { entity: splash, label: expect.any(String), part: "gems" }]
+    ]);
+    // Halfway: the energy on the overlay's "in" (0.5²), the gems linear.
+    expect([factor(stage, energy), factor(stage, gems)]).toEqual([0.25, 0.5]);
   });
 });

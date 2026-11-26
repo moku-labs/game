@@ -456,6 +456,8 @@ export type State = {
   offFrame: (() => void) | undefined;
   /** Remover of the world system that samples the tracks born since the step (F241). */
   offSample: (() => void) | undefined;
+  /** Remover of the world system that samples the tracks the enter hooks of phase `layout` started (F241). */
+  offPose: (() => void) | undefined;
   /** Remover of `flow.fx.handle("play")`. */
   offPlay: (() => void) | undefined;
   /** Bound in `onInit`, so the teardown context can end everything with the state alone. */

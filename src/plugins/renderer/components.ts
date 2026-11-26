@@ -4,7 +4,7 @@
  * to be registered.
  */
 import { component, withNeutral } from "../world/ecs/define";
-import type { ComponentValue, Entity, Narrowed } from "../world/types";
+import type { ComponentValue, Ease, Entity, Narrowed } from "../world/types";
 import type { Point } from "./types";
 
 /**
@@ -359,12 +359,14 @@ export type OverlayValue = {
 
 /**
  * When the HUD parts an overlay hid come back after it leaves: `delayMs` of game time counted from the frame its leave
- * starts, then a linear fade of `fadeMs` (0 shows them at once); a key of `parts` takes its own delay or fade. Only the
- * parts the overlay hid wait: every part with `hud: "none"`, the parts not in the list with a list; `"all"` and
+ * starts, then a fade of `fadeMs` (0 shows them at once), linear or shaped by `ease`; `keyframes` move each part over
+ * the same fade from its first key to where it rests. A key of `parts` takes its own delay, fade, curve or keys. Only
+ * the parts the overlay hid wait: every part with `hud: "none"`, the parts not in the list with a list; `"all"` and
  * `"under"` hide none. While the overlay still leaves, the lower of its own fade and the return holds a part down
- * (they multiply). A paused game holds the return, a time scale slows it; with reduced motion on the fade is cut and
- * the delay is kept. A new scene ends it, and so does the same overlay showing again. `HudKey` narrows the keys of
- * `parts` to the game's HUD keys, as `componentsFor` does.
+ * (they multiply). A paused game holds the return, a time scale slows it; with reduced motion on the fade and the walk
+ * are cut and the delay is kept. A new scene ends it, and so does the same overlay showing again; the part is then at
+ * rest at once. A part takes no tap until it is fully back and at rest. `HudKey` narrows the keys of `parts` to the
+ * game's HUD keys, as `componentsFor` does. The value is data (names and numbers, no function): the world stores it.
  *
  * @example
  * ```ts
@@ -374,6 +376,11 @@ export type OverlayValue = {
  * const staggered: HudReturn<"energy" | "gems" | "stars"> = {
  *   delayMs: 1100, fadeMs: 400, parts: { gems: { delayMs: 1250 }, stars: { delayMs: 1400 } }
  * };
+ * // exam-in: the pills slide down 8 units to their place as they fade in, on cubic-bezier(.25, .6, .3, 1). Alpha and
+ * // offset: 0 and -8 at 1100 ms, 0.596 and -3.23 at 1275, 0.884 and -0.93 at 1450, 0.979 and -0.17 at 1625, 1 and 0 at 1800.
+ * const examIn: HudReturn<"energy" | "gems"> = {
+ *   delayMs: 1100, fadeMs: 700, ease: [0.25, 0.6, 0.3, 1], keyframes: [{ at: 0, Transform: { dy: -8 } }]
+ * };
  * ```
  */
 export type HudReturn<HudKey extends string = string> = {
@@ -381,8 +388,76 @@ export type HudReturn<HudKey extends string = string> = {
   delayMs: number;
   /** Milliseconds a part takes to come back after its delay; 0 shows it at once. */
   fadeMs: number;
-  /** Per HUD key, the delay or the fade of that part; a key not listed takes the values above. */
-  parts?: Partial<Record<HudKey, { delayMs?: number; fadeMs?: number }>>;
+  /**
+   * The curve of the fade and of the walk: the alpha is `ease(t)` over the fade, kept within 0..1. Linear without it,
+   * as before. An unknown name or a tuple with x1 or x2 outside 0..1 is linear, with a dev warning
+   * `renderer:hud-return-ease`.
+   */
+  ease?: HudEase;
+  /**
+   * The walk of each part over the fade: the part stands on the first key, walks the keys and rests where its
+   * `Transform` puts it at `at: 1`. Drawn on the part's view, never in its `Transform`. Two things differ from the keys of
+   * a `defineMotion` enter: a key without `ease` takes the return's curve (linear without one), not `"inOut"`; and
+   * `rotation` adds to the rest pose while `scale`, `scaleX` and `scaleY` multiply it, where `defineMotion` sets them.
+   * Keys that are empty, out of 0..1 or not ascending walk nothing, with a dev warning `renderer:hud-return-keys`.
+   */
+  keyframes?: readonly HudReturnKey[];
+  /** Per HUD key, the delay, fade, curve or keys of that part; each one not given is taken from above. */
+  parts?: Partial<
+    Record<
+      HudKey,
+      { delayMs?: number; fadeMs?: number; ease?: HudEase; keyframes?: readonly HudReturnKey[] }
+    >
+  >;
+};
+
+/**
+ * The curve of a `HudReturn` or of one of its keys: a named curve of the engine, or the four numbers of a CSS
+ * `cubic-bezier(x1, y1, x2, y2)`, x1 and x2 in 0..1 (y may leave 0..1 to overshoot). No function: an `Overlay` is
+ * stored in the world as JSON, and a function is not.
+ *
+ * @example
+ * ```ts
+ * // exam-in's curve: a quarter into a 700 ms fade the pills are at 0.596, halfway at 0.884.
+ * const examIn: HudEase = [0.25, 0.6, 0.3, 1];
+ * // A named curve: halfway into the fade the pills are at 0.875.
+ * const settle: HudEase = "outCubic";
+ * ```
+ */
+export type HudEase =
+  | Exclude<Ease, (t: number) => number>
+  | readonly [x1: number, y1: number, x2: number, y2: number];
+
+/**
+ * One key of the walk of a `HudReturn`, the `Transform` part of a `defineMotion` key: `at` is the share of `fadeMs`,
+ * 0..1; `dx`, `dy` (reference units) and `rotation` (radians) add to where the part rests, `scale`, `scaleX` and
+ * `scaleY` multiply it. A field a key leaves out holds the previous key's value; a field no key named yet is at rest.
+ * `ease` shapes the segment that ends on this key (the return's curve without it); a key at `at: 1` gives the last
+ * segment its curve, and the part still ends at rest.
+ *
+ * @example
+ * ```ts
+ * // exam-in: the pills start 8 units above their place and slide down to it over the fade.
+ * const fromAbove: readonly HudReturnKey[] = [{ at: 0, Transform: { dy: -8 } }];
+ * // A pop: from 80 % to 104 % at 60 % of the fade, then back to its own size on outCubic.
+ * const pop: readonly HudReturnKey[] = [
+ *   { at: 0, Transform: { scale: 0.8 } },
+ *   { at: 0.6, ease: "out", Transform: { scale: 1.04 } },
+ *   { at: 1, ease: "outCubic" }
+ * ];
+ * ```
+ */
+export type HudReturnKey = {
+  readonly at: number;
+  readonly ease?: HudEase;
+  readonly Transform?: {
+    readonly dx?: number;
+    readonly dy?: number;
+    readonly rotation?: number;
+    readonly scale?: number;
+    readonly scaleX?: number;
+    readonly scaleY?: number;
+  };
 };
 
 /**
@@ -526,6 +601,11 @@ export const Shape = /*#__PURE__*/ component("Shape", shapeDefaults);
  * <stack key="dailySuitcase" components={[Overlay({ dim: 0.7, hud: ["energy", "gems"], hudInert: true })]} />
  * // The splash: the pills come back 1100 ms after its leave started, over 700 ms, not with its own 800 ms fade.
  * <stack key="splash" components={[Overlay({ cover: "opaque", hud: "none", hudReturn: { delayMs: 1100, fadeMs: 700 } })]} />
+ * // exam-in: the pills slide down from 8 units above as they fade in, on a cubic-bezier; at 1450 ms alpha 0.884, y -0.93.
+ * const HUD_RETURN: HudReturn = {
+ *   delayMs: 1100, fadeMs: 700, ease: [0.25, 0.6, 0.3, 1], keyframes: [{ at: 0, Transform: { dy: -8 } }]
+ * };
+ * <stack key="ep06Title" components={[Overlay({ cover: "opaque", hud: "none", hold: true, hudReturn: HUD_RETURN })]} />
  * ```
  */
 export const Overlay = /*#__PURE__*/ component("Overlay", overlayDefaults);
@@ -616,6 +696,10 @@ export function sprite(
  * kit.Overlay({ dim: 0.82, dimColor: 0x1e161a, hud: "under" }).value.hud; // "under"
  * kit.Overlay({ dim: 0.7, hud: ["energy"], hudInert: true }).value.hudInert; // true
  * kit.Overlay({ hud: "none", hudReturn: { delayMs: 1100, fadeMs: 400, parts: { gems: { delayMs: 1250 } } } }).value.hudReturn?.delayMs; // 1100
+ * kit.Overlay({
+ *   hud: "none",
+ *   hudReturn: { delayMs: 1100, fadeMs: 700, ease: [0.25, 0.6, 0.3, 1], keyframes: [{ at: 0, Transform: { dy: -8 } }] }
+ * }).value.hudReturn?.ease; // [0.25, 0.6, 0.3, 1]
  * ```
  */
 export type RendererKit<Asset extends string, HudKey extends string = string> = {

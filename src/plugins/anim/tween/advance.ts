@@ -1368,7 +1368,9 @@ export function advanceTracks(actx: AnimCtx, deltaMs: number): void {
  * view is first drawn. The additive ones go first, as in the step. A track with a length of 0, one a timeline drives,
  * one that began or one still in its delay writes nothing here; the next step advances each from where it stands, so
  * no track runs a frame early. Nor does an additive track over a field a 0 ms owner has not landed yet: its base is not
- * written yet, and the step writes base and offset in one frame.
+ * written yet, and the step writes base and offset in one frame. It runs twice a frame, first in phase `sync`
+ * (`anim.pose`) and in its tail (`anim.sample`); each call takes only the tracks born since the call before, so no
+ * track is sampled twice.
  *
  * @param actx - Domain context of the anim plugin.
  */

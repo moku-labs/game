@@ -115,6 +115,9 @@ export default [
       "tests/fixtures/mini-game/dist/**",
       // Build output of the filter bench: the release page the A26 run serves.
       "bench/filters/dist/**",
+      // Build output of the stress bench: the agent page its runs serve, and their results.
+      "bench/stress/dist/**",
+      "bench/stress/out*/**",
       // A v15-layout game for the project index and the lint e2e: its own tsconfig `paths`.
       "tests/fixtures/layout-game/**"
     ]

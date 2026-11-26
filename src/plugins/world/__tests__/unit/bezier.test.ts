@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cubicBezier } from "../../tween/bezier";
+import { cubicBezier } from "../../projection/bezier";
 
 // ---------------------------------------------------------------------------
 // Unit test: the CSS timing function `cubic-bezier(x1, y1, x2, y2)` read off a table built once.
@@ -84,7 +84,7 @@ const OTHERS = {
   verticalMiddle: [1, 0, 0, 1]
 } as const;
 
-describe("anim/tween cubicBezier", () => {
+describe("world/projection cubicBezier", () => {
   it("follows every curve of the design within 1e-4 of the analytic curve", () => {
     for (const points of Object.values(DESIGN)) expect(worstError(points)).toBeLessThan(1e-4);
   });

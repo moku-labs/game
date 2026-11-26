@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { BUDGET, NOISE } from "./budgets";
-import { bytesPerCall, exitEndNothingLeaves, exitEndStillExiting } from "./fixtures";
+import {
+  bytesPerCall,
+  exitEndNothingLeaves,
+  exitEndStillExiting,
+  leftStillDrawn
+} from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Perf: the check `assets` runs every time an element loses `Exiting` (change 2026-10-21-enter-pose-bundle-hold,
@@ -14,5 +19,9 @@ describe("the end of an exit, heap bytes per call", () => {
 
   it("while a scene leaves and another element still exits: nothing", () => {
     expect(bytesPerCall(exitEndStillExiting())).toBeLessThanOrEqual(BUDGET.stillExiting + NOISE);
+  });
+
+  it("while a dropped leave bundle is still drawn and asked again (F246): nothing", async () => {
+    expect(bytesPerCall(await leftStillDrawn())).toBeLessThanOrEqual(BUDGET.leftStillDrawn + NOISE);
   });
 });
