@@ -14,6 +14,7 @@
  * program on WebGPU, the GLSL one on WebGL.
  */
 import type { PixiModule } from "../types";
+import { SHAPE, SHAPE_BATCHER } from "./shape-batcher";
 
 /** The key of the glyph record on the proxy graphics of every bitmap text the renderer's pipe lays out. */
 export const SDF = Symbol("moku-sdf-glyphs");
@@ -501,6 +502,15 @@ export function createSdfBatcherPipe(pixi: PixiModule): PixiModule["BatcherPipe"
  * @param element - The element.
  */
 function routeElement(element: Routed): void {
+  // SPIKE hot path 5: a shape sprite goes to the shape batcher.
+  if ((element.renderable as { [SHAPE]?: unknown } | null | undefined)?.[SHAPE] !== undefined) {
+    element.batcherName = SHAPE_BATCHER;
+
+    return;
+  }
+
+  if (element.batcherName === SHAPE_BATCHER) element.batcherName = DEFAULT_BATCHER;
+
   const glyphs = element.renderable?.[SDF];
 
   if (glyphs !== undefined && glyphs.perScale > 0) element.batcherName = SDF_BATCHER;

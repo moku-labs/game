@@ -2455,6 +2455,8 @@ export type HitWalk = {
  * sync module state.
  */
 export type SyncState = {
+  /** SPIKE hot path 5: the shape sprite class, made for the Pixi module it was first asked for. */
+  shapeSprite: { pixi: object; made: new () => PixiContainer } | undefined;
   /** The container the viewport transform is written on. Its children are the layers. */
   root: PixiContainer | undefined;
   /** The list last read from `world.projection.layers()`, compared by reference. */

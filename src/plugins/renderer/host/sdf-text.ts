@@ -11,6 +11,7 @@
  */
 import type { PixiModule } from "../types";
 import { createSdfBatcher, createSdfBatcherPipe, SDF, type SdfGlyphs } from "./sdf-batcher";
+import { createShapeBatcher } from "./shape-batcher";
 
 /** Pixi's bitmap text pipe class, the base of the renderer's. */
 type BitmapTextPipeClass = PixiModule["BitmapTextPipe"];
@@ -171,7 +172,7 @@ export function installSdfText(pixi: PixiModule): () => void {
   const batchPipe = createSdfBatcherPipe(pixi);
 
   pixi.extensions.remove(pixi.BitmapTextPipe, pixi.BatcherPipe);
-  pixi.extensions.add(batcher, textPipe, batchPipe);
+  pixi.extensions.add(batcher, textPipe, batchPipe, createShapeBatcher(pixi) as typeof batcher);
 
   return (): void => {
     // The batcher stays registered: Pixi looks batchers up by name when an instruction set meets one, and pooled

@@ -58,6 +58,7 @@ import {
 } from "./pools";
 import { isLeaving, parentOf } from "./pose";
 import { drawShapePath, isEmptyArc, paintShape } from "./shape-path";
+import { isShapeSprite, type ShapeSprite, shapeSpriteClass, writeShape } from "./shape-sprite";
 import { anchoredBoxInto, boxInto, createSpriteLayout, layoutSpriteInto } from "./sizing";
 import {
   clearFrames,
@@ -262,7 +263,13 @@ export function visualOf(sctx: SyncCtx, entity: Entity): Visual | undefined {
   }
 
   if (ecs.has(entity, Shape)) {
-    found.push({ kind: "Shape", textureKey: "", hollow: false, display: undefined });
+    // SPIKE hot path 5: `hollow` marks a shape drawn by the shape batcher.
+    found.push({
+      kind: "Shape",
+      textureKey: "",
+      hollow: drawnBySdf(ecs.get(entity, Shape)),
+      display: undefined
+    });
   }
 
   if (ecs.has(entity, Display)) {
@@ -1115,6 +1122,62 @@ function drawShape(
   }
 }
 
+/** SPIKE hot path 5: what the shape batcher wrote, for the walk. */
+const sdfStats = { writes: 0, made: 0 };
+
+(globalThis as { __hpShapeStats?: () => typeof sdfStats }).__hpShapeStats = () => sdfStats;
+
+/**
+ * SPIKE hot path 5: whether a shape is drawn by the shape batcher: the walk's switch is on, and it is an arc or a
+ * rounded or stroked rectangle without a dash.
+ *
+ * @param value - The shape value.
+ * @returns True for a shape the batcher draws.
+ */
+function drawnBySdf(value: Readonly<ShapeValue> | undefined): boolean {
+  const flags = globalThis as { __hpShape?: boolean; location?: { search: string } };
+
+  flags.__hpShape ??= flags.location?.search.includes("hpShape") === true;
+  if (!flags.__hpShape || value === undefined) return false;
+  if (value.dash > 0) return false;
+  if (value.kind === "arc") return true;
+
+  return value.kind === "rect" && (value.radius > 0 || value.strokeWidth > 0);
+}
+
+/**
+ * SPIKE hot path 5: writes a shape's numbers onto its sprite when they differ from the ones drawn last, and its tint.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view.
+ * @param object - Its shape sprite.
+ * @param value - The shape value.
+ */
+function drawSdfShape(
+  sctx: SyncCtx,
+  entity: Entity,
+  view: View,
+  object: ShapeSprite,
+  value: Readonly<ShapeValue>
+): void {
+  const tinted = value.strokeWidth <= 0;
+
+  if (!sameShape(view.drawn, value, tinted)) {
+    markView(sctx, entity);
+    writeShape(object, value, tinted ? WHITE : value.fill);
+    sdfStats.writes += 1;
+    view.drawn = copyShape(view.drawn, value, tinted);
+  }
+
+  const tint = tinted ? value.fill : WHITE;
+
+  if (object.tint !== tint) {
+    markView(sctx, entity);
+    object.tint = tint;
+  }
+}
+
 /**
  * Writes the box of a shape into the hit box its view owns: a changed shape allocates nothing.
  *
@@ -1144,7 +1207,22 @@ export function applyShape(sctx: SyncCtx, entity: Entity, view: View): void {
   const value = sctx.ctx.deps.world.ecs.get(entity, Shape);
   const object = view.object;
 
-  if (value === undefined || !isGraphics(object)) return;
+  if (value === undefined) return;
+
+  if (isShapeSprite(object)) {
+    const blank = isEmptyShape(value);
+
+    setHidden(sctx, entity, view, "empty", blank);
+    if (!blank) drawSdfShape(sctx, entity, view, object, value);
+
+    applyAlpha(sctx, entity, view, value);
+    writeHitBox(view.hitBox, value.w, value.h);
+    applyClip(sctx, entity, view, value);
+
+    return;
+  }
+
+  if (!isGraphics(object)) return;
 
   const empty = isEmptyShape(value);
 
@@ -1555,7 +1633,13 @@ function makeObject(sctx: SyncCtx, entity: Entity, visual: Visual): BuiltObject 
   if (pooled !== undefined) return { object: pooled, value: undefined };
   if (visual.kind === "Sprite")
     return { object: new pixi.Sprite(pixi.Texture.WHITE), value: undefined };
-  if (visual.kind === "Shape") return { object: new pixi.Graphics(), value: undefined };
+  if (visual.kind === "Shape")
+    return {
+      object: visual.hollow
+        ? new (shapeSpriteClass(sctx.ctx.state.sync, pixi))()
+        : new pixi.Graphics(),
+      value: undefined
+    };
 
   return { object: newSlice(sctx, pixi, visual.hollow), value: undefined };
 }
