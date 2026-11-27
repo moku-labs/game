@@ -5,7 +5,7 @@
  * loads it.
  */
 import path from "node:path";
-import type { Cli, Config, createApp, Target } from "@moku-labs/native";
+import type { Cli, Config, createApp, LaunchConfig, Target } from "@moku-labs/native";
 import type { DebugLevel } from "./build";
 import { TEST_APP_SUFFIX } from "./config";
 import type { PlistValue, ResolvedGameConfig } from "./types";
@@ -129,20 +129,6 @@ type NativeExtras = {
 
 /** The native section of a resolved config. */
 type NativeSection = NonNullable<ResolvedGameConfig["native"]>;
-
-/** The placement of a boot picture, as `resolveConfig` gives it. */
-type BootPlace = NonNullable<NonNullable<ResolvedGameConfig["page"]["boot"]>["place"]>;
-
-/**
- * `app.launch` of the native config: the still the shell shows before the page exists, and how it
- * fits the game frame, so the page's picture takes over at the same place.
- */
-// F247: written out because the installed @moku-labs/native types no app.launch; with the release that has it, this is NonNullable<Config["app"]["launch"]>.
-type LaunchBlock = {
-  still: { image: string; frame: BootPlace["frame"]; rect: BootPlace["rect"] };
-  aspect: BootPlace["aspect"];
-  orientation: BootPlace["orientation"];
-};
 
 /** The env vars Tauri signs an iOS build with, from an App Store Connect key. */
 type AppleKeyVariables = {
@@ -649,7 +635,7 @@ function appIdentityOf(
  * launchOf({ image: "assets/boot.png", width: "40vmin", fadeMs: 300 }); // undefined: a centred picture has no launch still
  * ```
  */
-function launchOf(boot: ResolvedGameConfig["page"]["boot"]): LaunchBlock | undefined {
+function launchOf(boot: ResolvedGameConfig["page"]["boot"]): LaunchConfig | undefined {
   if (boot?.place === undefined) return undefined;
 
   const { frame, rect, aspect, orientation } = boot.place;
@@ -1168,7 +1154,7 @@ export async function runNative(
 
   const native = await import("@moku-labs/native").catch((error: unknown) => {
     throw new Error(
-      "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.13.",
+      "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.17.",
       { cause: error }
     );
   });

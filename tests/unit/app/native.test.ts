@@ -229,20 +229,6 @@ function appleOf(config: NativeConfig): NonNullable<NativeConfig["signing"]>["ap
   return config.signing?.apple;
 }
 
-/** The launch block of a native app config, as the release of native with `app.launch` types it. */
-type LaunchApp = { launch?: unknown };
-
-/**
- * The launch still a native config hands the shell.
- *
- * @param config - The native config.
- * @returns `app.launch`, or `undefined` without one.
- */
-function launchOf(config: NativeConfig): unknown {
-  // F247: the installed @moku-labs/native types no app.launch yet; read it through the narrow type.
-  return (config.app as LaunchApp).launch;
-}
-
 /**
  * The seams of a store build that has everything: the passwords set and every file there.
  *
@@ -461,15 +447,15 @@ describe("nativeConfigOf", () => {
     };
     const centred = settingsOf({ page: { ...page, boot: { image: "assets/boot.png" } } });
 
-    expect(launchOf(nativeConfigOf(placed, where, "ios"))).toEqual(launch);
+    expect(nativeConfigOf(placed, where, "ios").app.launch).toEqual(launch);
     expect(
-      launchOf(nativeConfigOf(placed, where, "android", { debug: { level: "full" } }))
+      nativeConfigOf(placed, where, "android", { debug: { level: "full" } }).app.launch
     ).toEqual(launch);
 
     const testApp = settingsOf({ native: withTestApp, page: placedPage });
 
     expect(
-      launchOf(nativeConfigOf(testApp, where, "android", { dev: true, buildNumber: 13 }))
+      nativeConfigOf(testApp, where, "android", { dev: true, buildNumber: 13 }).app.launch
     ).toEqual(launch);
     expect(nativeConfigOf(centred, where, "android").app).not.toHaveProperty("launch");
   });
@@ -1199,7 +1185,7 @@ describe("runNative", () => {
         fresh.runNative("build", settingsOf(), where, { target: "ios" })
       ).rejects.toThrow(
         new Error(
-          "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.13."
+          "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.17."
         )
       );
     } finally {
