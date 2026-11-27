@@ -42,7 +42,13 @@ export function createNode(state: LayoutState, element: Element): YogaNode | und
   if (existing !== undefined) return existing;
 
   // SPIKE hp-2ab: a node freed before is taken back with the Yoga values it holds and its kept record of them.
-  const pooled = spikeOn() ? poolOf(state).pop() : undefined;
+  const on = spikeOn();
+
+  if (!on) spikeDrain(state);
+
+  const pooled = on ? poolOf(state).pop() : undefined;
+
+  spikeCount(state);
 
   if (pooled !== undefined) {
     spikeUnsetExtents(pooled.node, pooled.kept);
@@ -60,6 +66,22 @@ export function createNode(state: LayoutState, element: Element): YogaNode | und
   state.nodes += 1;
 
   return node;
+}
+
+/** SPIKE hp-2ab: with the spike off, the pool frees what it holds, so an off block carries no pool. */
+function spikeDrain(state: LayoutState): void {
+  const pool = SPIKE_POOLS.get(state);
+
+  if (pool === undefined || pool.length === 0) return;
+
+  for (const entry of pool) entry.node.free();
+  pool.length = 0;
+  spikeCount(state);
+}
+
+/** SPIKE hp-2ab: the size of the pool, for the walk (`globalThis.__hp2abPool`). */
+function spikeCount(state: LayoutState): void {
+  (globalThis as { __hp2abPool?: number }).__hp2abPool = SPIKE_POOLS.get(state)?.length ?? 0;
 }
 
 /** SPIKE hp-2ab: the freed nodes kept for the next element, with their kept records. */
@@ -174,6 +196,7 @@ export function freeNode(state: LayoutState, element: Element): void {
       node.removeChild(node.getChild(index));
     }
     poolOf(state).push({ node, kept });
+    spikeCount(state);
   } else node.free();
   state.kept.delete(node);
   state.byEntity.delete(element.entity);
