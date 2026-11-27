@@ -41,6 +41,18 @@ export function createNode(state: LayoutState, element: Element): YogaNode | und
 
   if (existing !== undefined) return existing;
 
+  // SPIKE hp-2ab: a node freed before is taken back with the Yoga values it holds and its kept record of them.
+  const pooled = poolOf(state).pop();
+
+  if (pooled !== undefined) {
+    spikeUnsetExtents(pooled.node, pooled.kept);
+    state.byEntity.set(element.entity, pooled.node);
+    state.kept.set(pooled.node, pooled.kept);
+    state.nodes += 1;
+
+    return pooled.node;
+  }
+
   const node = state.yoga.Node.create();
 
   state.byEntity.set(element.entity, node);
@@ -48,6 +60,45 @@ export function createNode(state: LayoutState, element: Element): YogaNode | und
   state.nodes += 1;
 
   return node;
+}
+
+/** SPIKE hp-2ab: the freed nodes kept for the next element, with their kept records. */
+const SPIKE_POOLS = new WeakMap<LayoutState, { node: YogaNode; kept: Float64Array }[]>();
+
+/** SPIKE hp-2ab: the pool of one layout state, whose Yoga module made its nodes. */
+function poolOf(state: LayoutState): { node: YogaNode; kept: Float64Array }[] {
+  let pool = SPIKE_POOLS.get(state);
+
+  if (pool === undefined) {
+    pool = [];
+    SPIKE_POOLS.set(state, pool);
+  }
+
+  return pool;
+}
+
+/**
+ * SPIKE hp-2ab: a style that writes no extent leaves it alone, which reads "unset" only on a fresh node: the six
+ * extents a pooled node still holds are unset here (slots 28–38 of the kept record, kind then number).
+ */
+function spikeUnsetExtents(node: YogaNode, kept: Float64Array): void {
+  for (let slot = 28; slot <= 38; slot += 2) {
+    if (kept[slot] === 0 && Number.isNaN(kept[slot + 1])) continue;
+
+    kept[slot] = 0;
+    kept[slot + 1] = Number.NaN;
+    if (slot === 28) node.setWidth(Number.NaN);
+    else if (slot === 30) node.setHeight(Number.NaN);
+    else if (slot === 32) node.setMinWidth(Number.NaN);
+    else if (slot === 34) node.setMinHeight(Number.NaN);
+    else if (slot === 36) node.setMaxWidth(Number.NaN);
+    else node.setMaxHeight(Number.NaN);
+  }
+}
+
+/** SPIKE hp-2ab: whether the pool is on (`globalThis.__hp2ab`). */
+function spikeOn(): boolean {
+  return ((globalThis as { __hp2ab?: boolean }).__hp2ab ?? (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.HP2AB === "1") === true;
 }
 
 /**
@@ -107,11 +158,23 @@ export function freeNode(state: LayoutState, element: Element): void {
   if (node === undefined) return;
 
   detachNode(state, element);
+
+  const kept = state.kept.get(node);
+  const pool = spikeOn() && kept !== undefined && poolOf(state).length < 4096;
+
+  // SPIKE hp-2ab: a measured node is marked dirty before its function goes, so its cached size is not served again.
+  if (pool && state.measuring.has(node)) node.markDirty();
   // eslint-disable-next-line unicorn/no-null -- Yoga clears a measure function with null.
   node.setMeasureFunc(null);
   state.measuring.delete(node);
   forgetPlaced(state, node);
-  node.free();
+  if (pool) {
+    for (let index = node.getChildCount() - 1; index >= 0; index -= 1) {
+      // eslint-disable-next-line unicorn/prefer-dom-node-remove -- a Yoga node is not a DOM node.
+      node.removeChild(node.getChild(index));
+    }
+    poolOf(state).push({ node, kept });
+  } else node.free();
   state.kept.delete(node);
   state.byEntity.delete(element.entity);
   state.nodes -= 1;

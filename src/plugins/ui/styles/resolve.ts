@@ -176,6 +176,10 @@ export function resolve(
 ): ResolvedStyle {
   const merged: Record<string, unknown> = {};
 
+  if (style !== undefined && ((globalThis as { __hp2ab?: boolean }).__hp2ab ?? (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.HP2AB === "1") === true) {
+    return Object.freeze(spikeResolve(merged, style, flags, viewport));
+  }
+
   if (style !== undefined) {
     const { is, when, ...base } = style;
 
@@ -193,4 +197,76 @@ export function resolve(
   }
 
   return Object.freeze(withSafeArea(merged, viewport));
+}
+
+/** SPIKE hp-2ab: the same merge with no rest copy, no entries array, and the edges rebuilt only for a token. */
+function spikeResolve(
+  merged: Record<string, unknown>,
+  style: Style | TextTagStyle,
+  flags: StyleFlags,
+  viewport: ViewportSize
+): ResolvedStyle {
+  const source = style as Record<string, unknown>;
+
+  for (const field in source) {
+    if (field === "is" || field === "when") continue;
+
+    const value = source[field];
+
+    if (value !== undefined) merged[field] = value;
+  }
+
+  const { is, when } = style;
+
+  if (when !== undefined) for (const name of WHEN_ORDER) if (flags[name]) spikeMerge(merged, when[name], true);
+  if (is !== undefined) {
+    for (const name of IS_ORDER) {
+      const pointer = name === "hover" || name === "pressed";
+
+      if (!flags[name] || (flags.disabled && pointer)) continue;
+
+      spikeMerge(merged, is[name], false);
+    }
+  }
+
+  const safeArea = viewport.safeArea;
+
+  for (const edge of ["padding", "margin"] as const) {
+    const value = merged[edge];
+
+    if (typeof value === "string") merged[edge] = lengthOf(value as Length, safeArea);
+    else if (typeof value === "object" && value !== null) {
+      const sides = value as Record<string, unknown>;
+
+      if (
+        typeof sides.top === "string" ||
+        typeof sides.right === "string" ||
+        typeof sides.bottom === "string" ||
+        typeof sides.left === "string"
+      ) {
+        merged[edge] = edgesOf(value as Edges, safeArea);
+      }
+    }
+  }
+
+  for (const edge of ["left", "top", "right", "bottom"] as const) {
+    const value = merged[edge];
+
+    if (typeof value === "string") merged[edge] = lengthOf(value as Length, safeArea);
+  }
+
+  return merged as ResolvedStyle;
+}
+
+/** SPIKE hp-2ab: `merge` with a for-in. */
+function spikeMerge(into: Record<string, unknown>, variant: BaseStyle | undefined, keepsText: boolean): void {
+  if (variant === undefined) return;
+
+  const source = variant as Record<string, unknown>;
+
+  for (const field in source) {
+    const value = source[field];
+
+    if (value !== undefined && (keepsText || field !== "text")) into[field] = value;
+  }
 }
