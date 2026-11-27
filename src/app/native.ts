@@ -1154,7 +1154,7 @@ export async function runNative(
 
   const native = await import("@moku-labs/native").catch((error: unknown) => {
     throw new Error(
-      "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.17.",
+      "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.18.",
       { cause: error }
     );
   });
