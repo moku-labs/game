@@ -301,11 +301,58 @@ describe("resolveConfig", () => {
       "a placed picture the native still cannot take",
       { image: "assets/boot.jpg", frame: placedFrame, rect: placedRect },
       '[game] config.page.boot.image "assets/boot.jpg" is not a .png or .webp file.'
+    ],
+    [
+      "a frame that is an array",
+      { frame: [], rect: placedRect },
+      "[game] config.page.boot.frame is []."
+    ],
+    [
+      "a frame with no prototype",
+      { frame: Object.create(null) as object, rect: placedRect },
+      "[game] config.page.boot.frame.width is undefined."
+    ],
+    [
+      "an orientation in an array",
+      { frame: placedFrame, rect: placedRect, orientation: ["portrait"] },
+      '[game] config.page.boot.orientation is ["portrait"].'
+    ],
+    [
+      "a rect x in an array",
+      { frame: placedFrame, rect: { ...placedRect, x: ["5"] } },
+      '[game] config.page.boot.rect.x is ["5"].'
+    ],
+    [
+      "a size the CSS would print as 0",
+      { frame: placedFrame, rect: { ...placedRect, width: 0.000_000_4 } },
+      "[game] config.page.boot.rect.width is 4e-7."
+    ],
+    [
+      "an aspect min the CSS would print as 0",
+      { frame: placedFrame, rect: placedRect, aspect: { min: 0.000_000_4, max: 2.6 } },
+      "[game] config.page.boot.aspect.min is 4e-7."
     ]
   ])("refuses %s, naming the field", (_name, part, first) => {
     const boot = { image: "assets/boot.webp", ...part } as NonNullable<GameConfig["page"]["boot"]>;
 
     expect(firstLineOf(() => resolveConfig({ page: { title: "T", boot } }))).toBe(first);
+  });
+
+  // Bug: the smallest size the CSS can print is refused, or the fix names a number a person cannot read.
+  it("a size of 0.000001 is taken; a smaller one is told the least it may be", () => {
+    const rect = { ...placedRect, width: 0.000_001 };
+    const boot = { image: "assets/boot.webp", frame: placedFrame, rect };
+
+    expect(resolveConfig({ page: { title: "T", boot } }).page.boot?.place?.rect.width).toBe(
+      0.000_001
+    );
+    expect(() =>
+      resolveConfig({ page: { title: "T", boot: { ...boot, rect: { ...rect, width: 0 } } } })
+    ).toThrow(
+      new Error(
+        "[game] config.page.boot.rect.width is 0.\n  Use a finite number of 0.000001 or more."
+      )
+    );
   });
 
   // Bug: the image check refuses a picture the shell takes, or a centred boot that never reaches the shell.

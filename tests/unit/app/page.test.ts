@@ -6,6 +6,7 @@
  */
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fadeBoot, signalLaunch } from "../../../src/app/boot";
 import { resolveConfig } from "../../../src/app/config";
 import { startPage } from "../../../src/app/page";
 import type {
@@ -511,6 +512,45 @@ describe("startPage: the shell, the handles and the start", () => {
 
     expect(failures).toHaveLength(1);
     expect(failures[0]?.data).toMatchObject({ error: { message: "no bridge" } });
+  });
+
+  // Bug: a page whose global holds something else under the name logs a TypeError on every start.
+  it("a __mokuLaunch with no callable ready does nothing and logs nothing", async () => {
+    for (const launch of [{ ready: 5 }, 7, { other: () => undefined }]) {
+      vi.stubGlobal("__mokuLaunch", launch);
+
+      const { app } = await open();
+
+      await vi.waitFor(() => expect(app.scenes.current()).toBeDefined());
+      app.time.step(16);
+
+      expect(logged(app, "error")).toEqual([]);
+    }
+  });
+
+  // Bug: the fade unsubscribing in the first scene frame makes the real frame list skip the next
+  // callback, so the shell's still outlives the page's picture.
+  it("in the frame the fade removes the picture and unsubscribes, the launch signal still runs, after it", async () => {
+    const order: string[] = [];
+    const element = {
+      style: { opacity: "" },
+      addEventListener: () => undefined,
+      remove: () => order.push("fade")
+    };
+    const { app } = await open();
+
+    await vi.waitFor(() => expect(app.scenes.current()).toBeDefined());
+    // As startPage registers them: the fade first, the launch signal right after.
+    fadeBoot(app.time, app.scenes, element, 0);
+    signalLaunch(
+      app.time,
+      app.scenes,
+      () => order.push("launch"),
+      () => order.push("report")
+    );
+    app.time.step(16);
+
+    expect(order).toEqual(["fade", "launch"]);
   });
 });
 

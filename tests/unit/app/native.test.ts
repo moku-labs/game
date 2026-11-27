@@ -445,13 +445,15 @@ describe("nativeConfigOf", () => {
 
   // Bug: the native still stands elsewhere than the page's, takes the page orientation "any", or a
   // centred boot asks the shell for a launch still it cannot place.
-  it("a placed page.boot gives app.launch the still, the aspect and the orientation, in the store and debug profiles; a centred boot gives none", () => {
+  it("a placed page.boot gives app.launch the still, the aspect and the orientation, in the store, debug and dev profiles; a centred boot gives none", () => {
     const frame = { width: 1024, height: 1536 };
     const rect = { x: 215, y: 402, width: 600, height: 640 };
     const page = { title: "T", background: "#F4E6CA", orientation: "any" as const };
-    const placed = settingsOf({
-      page: { ...page, boot: { image: "assets/splash/studio.webp", frame, rect, fadeMs: 0 } }
-    });
+    const placedPage = {
+      ...page,
+      boot: { image: "assets/splash/studio.webp", frame, rect, fadeMs: 0 }
+    };
+    const placed = settingsOf({ page: placedPage });
     const launch = {
       still: { image: "assets/splash/studio.webp", frame, rect },
       aspect: { min: 4 / 3, max: 21 / 9 },
@@ -462,6 +464,12 @@ describe("nativeConfigOf", () => {
     expect(launchOf(nativeConfigOf(placed, where, "ios"))).toEqual(launch);
     expect(
       launchOf(nativeConfigOf(placed, where, "android", { debug: { level: "full" } }))
+    ).toEqual(launch);
+
+    const testApp = settingsOf({ native: withTestApp, page: placedPage });
+
+    expect(
+      launchOf(nativeConfigOf(testApp, where, "android", { dev: true, buildNumber: 13 }))
     ).toEqual(launch);
     expect(nativeConfigOf(centred, where, "android").app).not.toHaveProperty("launch");
   });

@@ -271,12 +271,32 @@ function followBoot(app: PageApp, boot: ResolvedPageBoot | undefined): void {
 /**
  * Tells a native shell with `app.launch` that the first scene drew, so it drops its launch
  * still: the shell injects `globalThis.__mokuLaunch`. Called on the object, so its receiver stays
- * (the Android bridge needs it). Anywhere else there is no object and nothing happens.
+ * (the Android bridge needs it). Anywhere else, or with a `__mokuLaunch` that has no callable
+ * `ready`, nothing happens and nothing is logged.
  */
 function launchReady(): void {
-  const launch = Reflect.get(globalThis, "__mokuLaunch") as { ready(): void } | undefined;
+  const launch: unknown = Reflect.get(globalThis, "__mokuLaunch");
 
-  launch?.ready();
+  if (!isLaunchBridge(launch)) return;
+
+  launch.ready();
+}
+
+/**
+ * Tells whether a value is the launch bridge a native shell injects: an object with a `ready`
+ * function.
+ *
+ * @param value - `globalThis.__mokuLaunch`, unchecked.
+ * @returns True for an object whose `ready` is a function.
+ * @example
+ * ```ts
+ * isLaunchBridge({ ready: 5 }); // false
+ * ```
+ */
+function isLaunchBridge(value: unknown): value is { ready(): void } {
+  return (
+    typeof value === "object" && value !== null && typeof Reflect.get(value, "ready") === "function"
+  );
 }
 
 /**

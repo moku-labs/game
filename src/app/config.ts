@@ -19,6 +19,12 @@ const BOOT_WIDTH = "40vmin";
 /** The fade of a boot picture whose config names none, ms. */
 const BOOT_FADE_MS = 300;
 
+/**
+ * The smallest size and `aspect.min` of a placed boot: the page writes numbers with 6 decimals, so
+ * anything smaller prints as 0 and the CSS divides by zero.
+ */
+const BOOT_MIN_SIZE = 0.000_001;
+
 /** The pictures a placed boot may name: the native launch still takes only PNG and WebP. */
 const PLACED_IMAGE = /\.(?:png|webp)$/i;
 
@@ -240,7 +246,18 @@ function checkTestApp(native: GameConfig["native"]): void {
  * ```
  */
 function shown(value: unknown): string {
-  return typeof value === "string" ? JSON.stringify(value) : String(value);
+  const isPlain = typeof value === "number" || typeof value === "boolean" || value === undefined;
+
+  if (isPlain) return String(value);
+
+  // A string, an array or an object as JSON; what JSON cannot write (a function, a bigint) by its tag.
+  try {
+    const text: string | undefined = JSON.stringify(value);
+
+    return text ?? Object.prototype.toString.call(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
 }
 
 /**
@@ -250,10 +267,10 @@ function shown(value: unknown): string {
  * @param value - The block, unchecked.
  * @param fields - The fields it holds, for the message, such as `{ width, height }`.
  * @returns The block.
- * @throws {Error} When the block is not an object.
+ * @throws {Error} When the block is not an object, or is an array.
  */
 function bootBlock(field: string, value: unknown, fields: string): object {
-  if (value instanceof Object && !Array.isArray(value)) return value;
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) return value;
 
   throw new Error(`[game] config.page.boot.${field} is ${shown(value)}.\n  Use ${fields}.`);
 }
@@ -264,33 +281,25 @@ function bootBlock(field: string, value: unknown, fields: string): object {
  * @param block - The block that holds it, such as `page.boot.rect`.
  * @param path - The path of the block under `page.boot`, such as `rect`.
  * @param key - The number's key in the block, such as `x`.
- * @param least - `"above 0"` for a size, `"of 0 or more"` for a position.
+ * @param least - The smallest value it may take: `BOOT_MIN_SIZE` for a size and `aspect.min`, 0 for
+ *   a position.
  * @returns The number.
  * @throws {Error} When the number is missing, not finite, or under its least value.
  */
-function bootNumber(
-  block: object,
-  path: string,
-  key: string,
-  least: "above 0" | "of 0 or more"
-): number {
+function bootNumber(block: object, path: string, key: string, least: number): number {
   const value: unknown = Reflect.get(block, key);
-  const inRange =
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    (least === "above 0" ? value > 0 : value >= 0);
 
-  if (inRange) return value;
+  if (typeof value === "number" && Number.isFinite(value) && value >= least) return value;
 
   throw new Error(
-    `[game] config.page.boot.${path}.${key} is ${shown(value)}.\n  Use a finite number ${least}.`
+    `[game] config.page.boot.${path}.${key} is ${shown(value)}.\n  Use a finite number of ${String(least)} or more.`
   );
 }
 
 /**
  * Throws for a `frame` or a `rect` of `page.boot` that cannot place the picture: one without the
- * other, a block that is no object or lacks a number, a size that is not above 0, a position under
- * 0, or a rect that leaves the frame.
+ * other, a block that is no object or lacks a number, a size under 0.000001 (it would print as 0
+ * in the CSS), a position under 0, or a rect that leaves the frame.
  *
  * @param frame - `page.boot.frame`, unchecked.
  * @param rect - `page.boot.rect`, unchecked.
@@ -310,13 +319,11 @@ function checkBootRect(frame: unknown, rect: unknown): void {
   }
 
   const canvas = bootBlock("frame", frame, "{ width, height }");
-  const frameWidth = bootNumber(canvas, "frame", "width", "above 0");
-  const frameHeight = bootNumber(canvas, "frame", "height", "above 0");
+  const frameWidth = bootNumber(canvas, "frame", "width", BOOT_MIN_SIZE);
+  const frameHeight = bootNumber(canvas, "frame", "height", BOOT_MIN_SIZE);
   const box = bootBlock("rect", rect, "{ x, y, width, height }");
-  const right =
-    bootNumber(box, "rect", "x", "of 0 or more") + bootNumber(box, "rect", "width", "above 0");
-  const bottom =
-    bootNumber(box, "rect", "y", "of 0 or more") + bootNumber(box, "rect", "height", "above 0");
+  const right = bootNumber(box, "rect", "x", 0) + bootNumber(box, "rect", "width", BOOT_MIN_SIZE);
+  const bottom = bootNumber(box, "rect", "y", 0) + bootNumber(box, "rect", "height", BOOT_MIN_SIZE);
 
   if (right > frameWidth) {
     throw new Error(
@@ -336,13 +343,13 @@ function checkBootRect(frame: unknown, rect: unknown): void {
  *
  * @param aspect - `page.boot.aspect`, unchecked.
  * @param orientation - `page.boot.orientation`, unchecked.
- * @throws {Error} When `aspect` is no object, `min` is not a finite number above 0, `max` is not a
+ * @throws {Error} When `aspect` is no object, `min` is not a finite number of 0.000001 or more, `max` is not a
  * finite number of `min` or more, or `orientation` is neither `"portrait"` nor `"landscape"`.
  */
 function checkBootFit(aspect: unknown, orientation: unknown): void {
   if (aspect !== undefined) {
     const range = bootBlock("aspect", aspect, "{ min, max }");
-    const min = bootNumber(range, "aspect", "min", "above 0");
+    const min = bootNumber(range, "aspect", "min", BOOT_MIN_SIZE);
     const max: unknown = Reflect.get(range, "max");
 
     if (!(typeof max === "number" && Number.isFinite(max) && max >= min)) {

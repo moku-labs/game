@@ -111,7 +111,6 @@ export type GameConfig = {
      * `..`; `width` is its CSS width, default `"40vmin"`; `fadeMs` the fade, default `300`, `0`
      * removes the picture in that frame.
      *
-     *
      * With `frame` and `rect` the picture stands where the game draws it instead: `frame` is the
      * canvas the place is given in, laid over the game frame like CSS `cover`, and `rect` is where
      * the picture lies on that canvas. The game frame is the one the renderer fits into the window

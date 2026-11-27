@@ -228,7 +228,7 @@ A value TypeScript would refuse, in a file that skips `satisfies`, stops `moku-g
 - `[game] config.page.boot.fadeMs is -1.` with `Use a number of milliseconds, 0 or more.`
 - `[game] config.page.boot has a frame but no rect.`, and `has a rect but no frame.`: the two come together.
 - `[game] config.page.boot.frame is 7.` with `Use { width, height }.`, and the same for `rect` (`{ x, y, width, height }`) and `aspect` (`{ min, max }`).
-- `[game] config.page.boot.frame.width is 0.` with `Use a finite number above 0.`, and the same for `frame.height`, `rect.width`, `rect.height` and `aspect.min`; a missing one reads `is undefined.`
+- `[game] config.page.boot.frame.width is 0.` with `Use a finite number of 0.000001 or more.`, and the same for `frame.height`, `rect.width`, `rect.height` and `aspect.min`: a smaller size prints as `0` in the CSS. A missing one reads `is undefined.`, an array `is ["5"].`
 - `[game] config.page.boot.rect.x is -1.` with `Use a finite number of 0 or more.`, and the same for `rect.y`.
 - `[game] config.page.boot.rect ends at x 1025, past frame.width 1024.` with `Keep the rect inside page.boot.frame.`, and the same at `y` past `frame.height`.
 - `[game] config.page.boot.aspect.max is 0.3.` with `Use a finite number of aspect.min (0.4) or more.`
