@@ -118,7 +118,7 @@ import type { GameConfig } from "@moku-labs/game/app";
 export default { page: { title: "Dice" } } satisfies GameConfig;
 ```
 
-`page.boot: { image: "assets/boot.png" }` shows a picture from the first paint until the first scene drew, then fades it out. Every key of `config.ts`: [docs/shell.md](./docs/shell.md).
+`page.boot: { image: "assets/boot.png" }` shows a picture from the first paint until the first scene drew, then fades it out; with `frame` and `rect` it stands where the game draws it, and a native build shows the same still before the page exists (Android 11 and later with no system splash; not yet iOS). Every key of `config.ts`: [docs/shell.md](./docs/shell.md).
 
 Tests make the app with `game.headless()` or `game.screen()`, not started, on a fake clock and an in-memory save:
 

@@ -130,6 +130,20 @@ type NativeExtras = {
 /** The native section of a resolved config. */
 type NativeSection = NonNullable<ResolvedGameConfig["native"]>;
 
+/** The placement of a boot picture, as `resolveConfig` gives it. */
+type BootPlace = NonNullable<NonNullable<ResolvedGameConfig["page"]["boot"]>["place"]>;
+
+/**
+ * `app.launch` of the native config: the still the shell shows before the page exists, and how it
+ * fits the game frame, so the page's picture takes over at the same place.
+ */
+// F247: written out because the installed @moku-labs/native types no app.launch; with the release that has it, this is NonNullable<Config["app"]["launch"]>.
+type LaunchBlock = {
+  still: { image: string; frame: BootPlace["frame"]; rect: BootPlace["rect"] };
+  aspect: BootPlace["aspect"];
+  orientation: BootPlace["orientation"];
+};
+
 /** The env vars Tauri signs an iOS build with, from an App Store Connect key. */
 type AppleKeyVariables = {
   APPLE_API_KEY: string;
@@ -624,7 +638,28 @@ function appIdentityOf(
 }
 
 /**
- * The app block of the native config: the identity and the window, and what this run adds.
+ * The launch still of the native shell, from a placed `page.boot`: the picture at its place on its
+ * frame, and how the shell fits the game frame. The image path goes as `icon` does, relative to the
+ * game folder. The shell's own `holdMaxMs` default stays.
+ *
+ * @param boot - `page.boot` of the resolved config, or `undefined`.
+ * @returns The `launch` block, or `undefined` for a page with no placed picture.
+ * @example
+ * ```ts
+ * launchOf({ image: "assets/boot.png", width: "40vmin", fadeMs: 300 }); // undefined: a centred picture has no launch still
+ * ```
+ */
+function launchOf(boot: ResolvedGameConfig["page"]["boot"]): LaunchBlock | undefined {
+  if (boot?.place === undefined) return undefined;
+
+  const { frame, rect, aspect, orientation } = boot.place;
+
+  return { still: { image: boot.image, frame, rect }, aspect, orientation };
+}
+
+/**
+ * The app block of the native config: the identity and the window, the launch still of a placed
+ * boot picture, and what this run adds.
  *
  * @param settings - The resolved `config.ts` of the game.
  * @param identity - The app this run builds.
@@ -636,6 +671,8 @@ function appOf(
   identity: AppIdentity,
   extras: NativeExtras
 ): NativeConfig["app"] {
+  const launch = launchOf(settings.page.boot);
+
   return {
     name: identity.name,
     identifier: identity.identifier,
@@ -644,7 +681,8 @@ function appOf(
     ...(identity.icon === undefined ? {} : { icon: identity.icon }),
     ...(extras.version === undefined ? {} : { version: extras.version }),
     ...(extras.buildNumber === undefined ? {} : { buildNumber: String(extras.buildNumber) }),
-    ...(settings.system.includes("keepAwake") ? { keepScreenOn: true } : {})
+    ...(settings.system.includes("keepAwake") ? { keepScreenOn: true } : {}),
+    ...(launch === undefined ? {} : { launch })
   };
 }
 

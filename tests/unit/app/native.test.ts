@@ -229,6 +229,20 @@ function appleOf(config: NativeConfig): NonNullable<NativeConfig["signing"]>["ap
   return config.signing?.apple;
 }
 
+/** The launch block of a native app config, as the release of native with `app.launch` types it. */
+type LaunchApp = { launch?: unknown };
+
+/**
+ * The launch still a native config hands the shell.
+ *
+ * @param config - The native config.
+ * @returns `app.launch`, or `undefined` without one.
+ */
+function launchOf(config: NativeConfig): unknown {
+  // F247: the installed @moku-labs/native types no app.launch yet; read it through the narrow type.
+  return (config.app as LaunchApp).launch;
+}
+
 /**
  * The seams of a store build that has everything: the passwords set and every file there.
  *
@@ -427,6 +441,29 @@ describe("nativeConfigOf", () => {
     expect(debug.projectDir).toBe("/g/.moku/tauri-debug");
     expect(debug.outDir).toBe("/g/dist-native");
     expect(debug.web.build).toContain("build --debug");
+  });
+
+  // Bug: the native still stands elsewhere than the page's, takes the page orientation "any", or a
+  // centred boot asks the shell for a launch still it cannot place.
+  it("a placed page.boot gives app.launch the still, the aspect and the orientation, in the store and debug profiles; a centred boot gives none", () => {
+    const frame = { width: 1024, height: 1536 };
+    const rect = { x: 215, y: 402, width: 600, height: 640 };
+    const page = { title: "T", background: "#F4E6CA", orientation: "any" as const };
+    const placed = settingsOf({
+      page: { ...page, boot: { image: "assets/splash/studio.webp", frame, rect, fadeMs: 0 } }
+    });
+    const launch = {
+      still: { image: "assets/splash/studio.webp", frame, rect },
+      aspect: { min: 4 / 3, max: 21 / 9 },
+      orientation: "portrait"
+    };
+    const centred = settingsOf({ page: { ...page, boot: { image: "assets/boot.png" } } });
+
+    expect(launchOf(nativeConfigOf(placed, where, "ios"))).toEqual(launch);
+    expect(
+      launchOf(nativeConfigOf(placed, where, "android", { debug: { level: "full" } }))
+    ).toEqual(launch);
+    expect(nativeConfigOf(centred, where, "android").app).not.toHaveProperty("launch");
   });
 
   it("an android config composes the native shell once, first; an ios config does not", () => {

@@ -8,6 +8,13 @@ import type { Orientation, Rect, SafeArea } from "./types";
 const EMPTY: Rect = { x: 0, y: 0, width: 0, height: 0 };
 
 /**
+ * The aspect range a game frame is fitted with when the game names none: long side / short side
+ * from 4:3 to 21:9. `renderer.aspect` defaults to it, and so does `page.boot.aspect` of
+ * `config.ts`, so the boot picture and the canvas fit one frame.
+ */
+export const DEFAULT_ASPECT: AspectRange = { min: 4 / 3, max: 21 / 9 };
+
+/**
  * Keeps a number inside a range.
  *
  * @param value - The number.

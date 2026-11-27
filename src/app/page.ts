@@ -13,7 +13,7 @@ import type { ClockSource } from "../plugins/clock/types";
 import { isControl } from "../plugins/flow/doors/dev";
 import { memory } from "../plugins/model/store/providers/memory";
 import type { PlayerStateProvider } from "../plugins/model/store/types";
-import { fadeBoot } from "./boot";
+import { fadeBoot, signalLaunch } from "./boot";
 import { resolveConfig } from "./config";
 import { pageSave } from "./save";
 import type {
@@ -269,6 +269,17 @@ function followBoot(app: PageApp, boot: ResolvedPageBoot | undefined): void {
 }
 
 /**
+ * Tells a native shell with `app.launch` that the first scene drew, so it drops its launch
+ * still: the shell injects `globalThis.__mokuLaunch`. Called on the object, so its receiver stays
+ * (the Android bridge needs it). Anywhere else there is no object and nothing happens.
+ */
+function launchReady(): void {
+  const launch = Reflect.get(globalThis, "__mokuLaunch") as { ready(): void } | undefined;
+
+  launch?.ready();
+}
+
+/**
  * Starts the agents, in order, after the app, in dev and in a debug build: each gets the app, the
  * page title and the game's `.dev` modules. A throwing agent is logged and the page keeps running.
  *
@@ -311,7 +322,9 @@ function openStartOverlay(app: PageApp, overlay: OverlayStart): void {
  * picks the save, makes the screen app on `#game` over the device clock and the manifest next to
  * the page, sets `globalThis.game`, `system` and `doors`, follows reduced motion, starts the shell,
  * then the app, follows the boot picture of `page.boot` (it fades once the first scene drew, and
- * is removed), and runs the graph. A graph that stops is logged, never thrown. In dev and in a
+ * is removed), signals the launch in that same first scene frame (`globalThis.__mokuLaunch.ready()`,
+ * which a native shell with `app.launch` injects so it drops its launch still; a failure is
+ * logged), and runs the graph. A graph that stops is logged, never thrown. In dev and in a
  * debug build it then logs `page:build` (the build id, the engine id, the control profile),
  * starts the agents and shows the overlay as `config.ts` `debug.overlay` asks. Every problem goes
  * to the app's log. On `pagehide` it flushes the save, and stops the app when the page is really
@@ -380,6 +393,10 @@ export async function startPage<Game extends AnyGameApp>(
   await app.start();
   // After start: the renderer registered its render callback then, so the fade's runs after the draw.
   followBoot(app, settings.page.boot);
+  // After the fade's callback: in the frame that removes the page's picture, the shell drops its still.
+  signalLaunch(app.time, app.scenes, launchReady, error => {
+    app.log.error("[game] The launch signal failed.", undefined, toError(error));
+  });
 
   app.flow.run().catch((error: unknown) => {
     app.log.error("[game] The graph stopped.", undefined, toError(error));

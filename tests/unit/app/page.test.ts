@@ -459,7 +459,8 @@ describe("startPage: the shell, the handles and the start", () => {
     });
   });
 
-  // Bug: a page with no document (or no #moku-boot) still subscribes a frame callback, or throws reading one.
+  // Bug: a page with no document (or no #moku-boot) still subscribes the fade's frame callback, or
+  // throws reading one. Both pages carry the launch signal's callback, so the counts match.
   it("a page with page.boot and no document adds no frame listener", async () => {
     const plain = await open();
     const listeners = plain.app.time.frameListeners();
@@ -467,6 +468,49 @@ describe("startPage: the shell, the handles and the start", () => {
     const { app } = await open({ page: { title: "mini-game", boot } });
 
     expect(app.time.frameListeners()).toBe(listeners);
+  });
+
+  // Bug: the native shell's still never leaves, or the Android bridge loses its receiver and throws.
+  it("the first frame with a scene calls __mokuLaunch.ready() once, on the object itself", async () => {
+    const receivers: unknown[] = [];
+    const launch = {
+      ready(this: unknown) {
+        receivers.push(this);
+      }
+    };
+
+    vi.stubGlobal("__mokuLaunch", launch);
+
+    const { app } = await open();
+
+    await vi.waitFor(() => expect(app.scenes.current()).toBeDefined());
+    app.time.step(16);
+    app.time.step(16);
+
+    expect(receivers).toHaveLength(1);
+    expect(receivers[0]).toBe(launch);
+  });
+
+  // Bug: a broken shell bridge stops the frame loop of the game, or fails without a trace.
+  it("a throwing __mokuLaunch.ready() is logged once and the page keeps running", async () => {
+    vi.stubGlobal("__mokuLaunch", {
+      ready: () => {
+        throw new Error("no bridge");
+      }
+    });
+
+    const { app } = await open();
+
+    await vi.waitFor(() => expect(app.scenes.current()).toBeDefined());
+    app.time.step(16);
+    app.time.step(16);
+
+    const failures = logged(app, "error").filter(
+      entry => entry.event === "[game] The launch signal failed."
+    );
+
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.data).toMatchObject({ error: { message: "no bridge" } });
   });
 });
 

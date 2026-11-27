@@ -111,6 +111,14 @@ export type GameConfig = {
      * `..`; `width` is its CSS width, default `"40vmin"`; `fadeMs` the fade, default `300`, `0`
      * removes the picture in that frame.
      *
+     *
+     * With `frame` and `rect` the picture stands where the game draws it instead: `frame` is the
+     * canvas the place is given in, laid over the game frame like CSS `cover`, and `rect` is where
+     * the picture lies on that canvas. The game frame is the one the renderer fits into the window
+     * with `aspect` and `orientation`. A native build with a placement shows the same picture at the
+     * same place before the page exists (the launch still: on Android 11 and later with no system
+     * splash, not yet on iOS) and drops it on the first scene frame.
+     *
      * @example
      * ```ts
      * // config.ts of A Memory Missing: the logo from the icon tap to the splash scene's first frame.
@@ -118,8 +126,49 @@ export type GameConfig = {
      *   page: { title: "A Memory Missing", background: "#F4E6CA", boot: { image: "assets/boot.png", width: "52vmin" } }
      * } satisfies GameConfig; // the logo fades over 300 ms, the default
      * ```
+     * @example
+     * ```ts
+     * // config.ts of A Memory Missing: the studio still at the title ring's place from the first paint;
+     * // a native build shows it before the page exists and drops it on the first scene frame.
+     * page: { title: "A Memory Missing", background: "#F4E6CA", boot: {
+     *   image: "assets/splash/studio.webp",
+     *   frame: { width: 1024, height: 1536 }, rect: { x: 215, y: 402, width: 600, height: 640 },
+     *   aspect: { min: 0.4, max: 2.6 }, fadeMs: 0
+     * } }
+     * // on a 384 × 832 window the picture stands at left 31.125, top 217.75, 325 × 346.667 CSS px
+     * ```
      */
-    boot?: { image: string; width?: string; fadeMs?: number };
+    boot?: {
+      /** The picture file, relative to the game folder. With `frame`, a `.png` or `.webp`: the native launch still takes only those. */
+      image: string;
+      /** The CSS width of a centred picture. Default `"40vmin"`. Not read when `frame` is set. */
+      width?: string;
+      /** The fade-out after the first scene drew, ms. Default `300`; `0` removes the picture in that frame. */
+      fadeMs?: number;
+      /**
+       * The canvas the place is given in, in its own pixels, such as the size of the splash art the
+       * game draws over its frame. It covers the game frame, centred (CSS `cover`). Set together
+       * with `rect`. Unset: the picture is centred by `width`.
+       */
+      frame?: { width: number; height: number };
+      /** Where the picture lies on `frame`, in its pixels, inside it. Set together with `frame`. */
+      rect?: { x: number; y: number; width: number; height: number };
+      /**
+       * The long side / short side range the game frame is fitted with. Default `{ min: 4 / 3, max: 21 / 9 }`,
+       * the renderer's own: a game that sets `renderer.aspect` in `index.ts` repeats it here. Only with
+       * `frame`. The page reads the window as `100vw` × `100vh`: the box the renderer measures in a
+       * native WebView and a desktop window; in a mobile browser tab with a collapsing toolbar
+       * `100vh` can be taller than that box, and the picture stands a little off.
+       */
+      aspect?: { min: number; max: number };
+      /**
+       * The orientation the game is designed for, `orientation` of `defineGameApp`, repeated here
+       * the way `aspect` is. Default: `page.orientation` when it is `"portrait"` or `"landscape"`,
+       * else `"portrait"`, so a landscape game with `page.orientation: "any"` must set it. Only
+       * with `frame`.
+       */
+      orientation?: "portrait" | "landscape";
+    };
   };
   /** The native app. Left out, the game has no native build. */
   native?: {
@@ -221,15 +270,31 @@ export type GameConfig = {
  * @example
  * ```ts
  * resolveConfig({ page: { title: "T", boot: { image: "assets/boot.png" } } }).page.boot; // { image: "assets/boot.png", width: "40vmin", fadeMs: 300 }
+ * const boot = { image: "assets/boot.webp", frame: { width: 1024, height: 1536 }, rect: { x: 215, y: 402, width: 600, height: 640 } };
+ * resolveConfig({ page: { title: "T", orientation: "any", boot } }).page.boot?.place; // { frame: { width: 1024, height: 1536 }, rect: { x: 215, y: 402, width: 600, height: 640 }, aspect: { min: 4 / 3, max: 21 / 9 }, orientation: "portrait" }
  * ```
  */
 export type ResolvedPageBoot = {
   /** The picture file, relative to the game folder. */
   image: string;
-  /** The CSS width of the picture. */
+  /** The CSS width of the picture. Not read when `place` is set. */
   width: string;
   /** The fade-out after the first scene drew, ms. */
   fadeMs: number;
+  /**
+   * Where the picture stands on the game frame: present only when the config names `frame`. The
+   * page writes its CSS from it, and a native build its launch still.
+   */
+  place?: {
+    /** The canvas the place is given in, laid over the game frame like CSS `cover`. */
+    frame: { width: number; height: number };
+    /** Where the picture lies on `frame`. */
+    rect: { x: number; y: number; width: number; height: number };
+    /** The long side / short side range the game frame is fitted with. */
+    aspect: { min: number; max: number };
+    /** The orientation the game is designed for. */
+    orientation: "portrait" | "landscape";
+  };
 };
 
 /**
