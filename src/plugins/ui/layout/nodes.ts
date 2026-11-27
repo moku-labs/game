@@ -42,7 +42,7 @@ export function createNode(state: LayoutState, element: Element): YogaNode | und
   if (existing !== undefined) return existing;
 
   // SPIKE hp-2ab: a node freed before is taken back with the Yoga values it holds and its kept record of them.
-  const pooled = poolOf(state).pop();
+  const pooled = spikeOn() ? poolOf(state).pop() : undefined;
 
   if (pooled !== undefined) {
     spikeUnsetExtents(pooled.node, pooled.kept);
