@@ -17,11 +17,11 @@ type Part = InstanceType<PixiModule["BatchableGraphics"]>;
 type Parts = { list: Part[]; count: number; changed: boolean };
 
 /** A shape view as the pipe reads it. */
-type ShapeView = { [PARTS]: Parts; _roundPixels: 0 | 1 };
+type ShapeView = { [PARTS]: Parts; roundPixels: boolean };
 
 /** The renderer, as the pipe reads it. */
 type Renderer = {
-  _roundPixels: 0 | 1;
+  roundPixels: boolean;
   renderPipes: { batch: { addToBatch(element: Part, instructionSet: unknown): void } };
 };
 
@@ -68,7 +68,7 @@ export function createShapePipe(pixi: PixiModule): unknown {
      */
     public addRenderable(view: ShapeView, instructionSet: unknown): void {
       const parts = view[PARTS];
-      const round: 0 | 1 = this.renderer._roundPixels === 1 || view._roundPixels === 1 ? 1 : 0;
+      const round: 0 | 1 = this.renderer.roundPixels || view.roundPixels ? 1 : 0;
 
       parts.changed = false;
 
