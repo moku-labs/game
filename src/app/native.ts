@@ -5,7 +5,7 @@
  * loads it.
  */
 import path from "node:path";
-import type { Cli, Config, createApp, Target } from "@moku-labs/native";
+import type { Cli, Config, createApp, LaunchConfig, Target } from "@moku-labs/native";
 import type { DebugLevel } from "./build";
 import { TEST_APP_SUFFIX } from "./config";
 import type { PlistValue, ResolvedGameConfig } from "./types";
@@ -624,7 +624,28 @@ function appIdentityOf(
 }
 
 /**
- * The app block of the native config: the identity and the window, and what this run adds.
+ * The launch still of the native shell, from a placed `page.boot`: the picture at its place on its
+ * frame, and how the shell fits the game frame. The image path goes as `icon` does, relative to the
+ * game folder. The shell's own `holdMaxMs` default stays.
+ *
+ * @param boot - `page.boot` of the resolved config, or `undefined`.
+ * @returns The `launch` block, or `undefined` for a page with no placed picture.
+ * @example
+ * ```ts
+ * launchOf({ image: "assets/boot.png", width: "40vmin", fadeMs: 300 }); // undefined: a centred picture has no launch still
+ * ```
+ */
+function launchOf(boot: ResolvedGameConfig["page"]["boot"]): LaunchConfig | undefined {
+  if (boot?.place === undefined) return undefined;
+
+  const { frame, rect, aspect, orientation } = boot.place;
+
+  return { still: { image: boot.image, frame, rect }, aspect, orientation };
+}
+
+/**
+ * The app block of the native config: the identity and the window, the launch still of a placed
+ * boot picture, and what this run adds.
  *
  * @param settings - The resolved `config.ts` of the game.
  * @param identity - The app this run builds.
@@ -636,6 +657,8 @@ function appOf(
   identity: AppIdentity,
   extras: NativeExtras
 ): NativeConfig["app"] {
+  const launch = launchOf(settings.page.boot);
+
   return {
     name: identity.name,
     identifier: identity.identifier,
@@ -644,7 +667,8 @@ function appOf(
     ...(identity.icon === undefined ? {} : { icon: identity.icon }),
     ...(extras.version === undefined ? {} : { version: extras.version }),
     ...(extras.buildNumber === undefined ? {} : { buildNumber: String(extras.buildNumber) }),
-    ...(settings.system.includes("keepAwake") ? { keepScreenOn: true } : {})
+    ...(settings.system.includes("keepAwake") ? { keepScreenOn: true } : {}),
+    ...(launch === undefined ? {} : { launch })
   };
 }
 
@@ -1130,7 +1154,7 @@ export async function runNative(
 
   const native = await import("@moku-labs/native").catch((error: unknown) => {
     throw new Error(
-      "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.13.",
+      "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.18.",
       { cause: error }
     );
   });

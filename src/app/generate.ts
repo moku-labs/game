@@ -208,18 +208,70 @@ export function linkedFiles(page: Page): [field: string, file: string][] {
 }
 
 /**
- * The style rule of the boot picture: centred, above the canvas, deaf to the pointer, fading
- * over `fadeMs` once the page sets its opacity to 0.
+ * A number of the boot rule: at most 6 decimals, no trailing zero.
+ *
+ * @param value - The number.
+ * @returns The CSS text.
+ * @example
+ * ```ts
+ * cssNumber(4 / 3); // "1.333333"
+ * ```
+ */
+function cssNumber(value: number): string {
+  return String(Number(value.toFixed(6)));
+}
+
+/**
+ * The declarations that place the boot picture where the game draws it: the game frame as
+ * `fitFrame` fits it (`--moku-fw`, `--moku-fh`), the scale of `place.frame` covering it
+ * (`--moku-k`), and the box of `place.rect` from the centre of the window. A landscape game swaps
+ * the roles of `vw` and `vh` in the two frame lines.
+ *
+ * @param place - `page.boot.place` of the resolved config.
+ * @returns The declarations, one line.
+ * @example
+ * ```ts
+ * placeDeclarations({ frame: { width: 100, height: 100 }, rect: { x: 0, y: 0, width: 10, height: 10 }, aspect: { min: 1, max: 2 }, orientation: "portrait" }).startsWith("--moku-fw: min(100vw, calc(100vh / 1));"); // true
+ * ```
+ */
+function placeDeclarations(place: NonNullable<Boot["place"]>): string {
+  const { frame, rect, aspect } = place;
+  const min = cssNumber(aspect.min);
+  const max = cssNumber(aspect.max);
+  const [frameWidth, frameHeight] =
+    place.orientation === "portrait"
+      ? [`min(100vw, calc(100vh / ${min}))`, `min(100vh, calc(100vw * ${max}))`]
+      : [`min(100vw, calc(100vh * ${max}))`, `min(100vh, calc(100vw / ${min}))`];
+
+  return (
+    `--moku-fw: ${frameWidth}; --moku-fh: ${frameHeight}; ` +
+    `--moku-k: max(calc(var(--moku-fw) / ${cssNumber(frame.width)}), calc(var(--moku-fh) / ${cssNumber(frame.height)})); ` +
+    `left: calc(50vw + var(--moku-k) * ${cssNumber(rect.x - frame.width / 2)}); ` +
+    `top: calc(50vh + var(--moku-k) * ${cssNumber(rect.y - frame.height / 2)}); ` +
+    `width: calc(var(--moku-k) * ${cssNumber(rect.width)}); height: calc(var(--moku-k) * ${cssNumber(rect.height)});`
+  );
+}
+
+/**
+ * The style rule of the boot picture: above the canvas, deaf to the pointer, fading over `fadeMs`
+ * once the page sets its opacity to 0. Centred at its `width`, or, with `place`, at the box
+ * `bootPlacement` computes, with no `transform`; `width` is then not read.
  *
  * @param boot - The boot picture of the page.
- * @returns The rule, with a space before it.
- * @throws {Error} When the width is not a CSS length.
+ * @returns The rule, one line, with a space before it.
+ * @throws {Error} When the picture is centred and its width is not a CSS length.
  * @example
  * ```ts
  * bootRule({ image: "boot.png", width: "52vmin", fadeMs: 0 }).includes("width: 52vmin;"); // true
  * ```
  */
 function bootRule(boot: Boot): string {
+  const tail = `z-index: 1; pointer-events: none; transition: opacity ${String(boot.fadeMs)}ms linear; }`;
+
+  if (boot.place !== undefined) {
+    return ` #moku-boot { position: fixed; ${placeDeclarations(boot.place)} ${tail}`;
+  }
+
   const width = safeValue(
     boot.width,
     `[game] moku-game: page.boot.width "${boot.width}" is not a CSS length.`
@@ -227,8 +279,7 @@ function bootRule(boot: Boot): string {
 
   return (
     ` #moku-boot { position: fixed; left: 50%; top: 50%; width: ${width}; height: auto; ` +
-    "transform: translate(-50%, -50%); z-index: 1; pointer-events: none; " +
-    `transition: opacity ${String(boot.fadeMs)}ms linear; }`
+    `transform: translate(-50%, -50%); ${tail}`
   );
 }
 
@@ -262,7 +313,8 @@ function bootImage(boot: Boot, toRoot: string): string {
  * @param links - The path to the game folder and the script.
  * @returns The HTML.
  * @throws {Error} When the background is not a CSS colour, the lang not a language tag, an icon
- *   path or the boot picture leaves the game folder, or the boot width is not a CSS length.
+ *   path or the boot picture leaves the game folder, or the width of a centred boot picture is
+ *   not a CSS length.
  * @example
  * ```ts
  * pageHtml(resolveConfig({ page: { title: "mini-game" } }).page, { toRoot: "../", script: "./main.ts" }).includes("<title>mini-game</title>"); // true

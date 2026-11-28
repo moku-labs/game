@@ -23,6 +23,7 @@ import { createHandlers } from "./handlers";
 import { startRenderer, stopRenderer } from "./lifecycle";
 import { createRendererState } from "./state";
 import type { Config, Events } from "./types";
+import { DEFAULT_ASPECT } from "./viewport/fit";
 
 const config: Config = {
   mount: undefined,
@@ -31,7 +32,7 @@ const config: Config = {
   maxResolution: 2,
   poolTrim: { restMs: 1000, aboveMb: 16 },
   preference: "webgpu",
-  aspect: { min: 4 / 3, max: 21 / 9 },
+  aspect: DEFAULT_ASPECT,
   // Objects and wrappers together. A closed window gives its views back here and the next one takes them (2в); the
   // album alone kept 599 on the A26. About 1.2 KB of JS heap each, measured there: about 1.2 MB when full.
   poolLimit: 1024,

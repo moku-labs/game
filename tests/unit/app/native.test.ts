@@ -429,6 +429,37 @@ describe("nativeConfigOf", () => {
     expect(debug.web.build).toContain("build --debug");
   });
 
+  // Bug: the native still stands elsewhere than the page's, takes the page orientation "any", or a
+  // centred boot asks the shell for a launch still it cannot place.
+  it("a placed page.boot gives app.launch the still, the aspect and the orientation, in the store, debug and dev profiles; a centred boot gives none", () => {
+    const frame = { width: 1024, height: 1536 };
+    const rect = { x: 215, y: 402, width: 600, height: 640 };
+    const page = { title: "T", background: "#F4E6CA", orientation: "any" as const };
+    const placedPage = {
+      ...page,
+      boot: { image: "assets/splash/studio.webp", frame, rect, fadeMs: 0 }
+    };
+    const placed = settingsOf({ page: placedPage });
+    const launch = {
+      still: { image: "assets/splash/studio.webp", frame, rect },
+      aspect: { min: 4 / 3, max: 21 / 9 },
+      orientation: "portrait"
+    };
+    const centred = settingsOf({ page: { ...page, boot: { image: "assets/boot.png" } } });
+
+    expect(nativeConfigOf(placed, where, "ios").app.launch).toEqual(launch);
+    expect(
+      nativeConfigOf(placed, where, "android", { debug: { level: "full" } }).app.launch
+    ).toEqual(launch);
+
+    const testApp = settingsOf({ native: withTestApp, page: placedPage });
+
+    expect(
+      nativeConfigOf(testApp, where, "android", { dev: true, buildNumber: 13 }).app.launch
+    ).toEqual(launch);
+    expect(nativeConfigOf(centred, where, "android").app).not.toHaveProperty("launch");
+  });
+
   it("an android config composes the native shell once, first; an ios config does not", () => {
     const shell = settingsOf({ system: ["back", "haptics"] });
 
@@ -1154,7 +1185,7 @@ describe("runNative", () => {
         fresh.runNative("build", settingsOf(), where, { target: "ios" })
       ).rejects.toThrow(
         new Error(
-          "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.13."
+          "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.18."
         )
       );
     } finally {

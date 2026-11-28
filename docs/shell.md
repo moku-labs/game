@@ -208,7 +208,7 @@ export default {
 | `page.orientation` | `"portrait"` | `"portrait"`, `"landscape"` or `"any"`. The native build locks it; the page writes nothing |
 | `page.icons` | none | `{ favicon?, appleTouch? }`: files relative to the game, written as `<link>` tags |
 | `page.head` | none | Raw tags for `<head>`, verbatim, in order |
-| `page.boot` | none | `{ image, width?, fadeMs? }`: the boot picture, shown from the first paint until the first scene drew. `image` is a file relative to the game; `width` its CSS width, `"40vmin"`; `fadeMs` the fade, `300` (`0` removes it in that frame). The page writes `<img id="moku-boot">` before `#game`, centred, above the canvas; the build copies it beside the page like the icons |
+| `page.boot` | none | `{ image, width?, fadeMs?, frame?, rect?, aspect?, orientation? }`: the boot picture, shown from the first paint until the first scene drew. `image` is a file relative to the game; `width` its CSS width, `"40vmin"`; `fadeMs` the fade, `300` (`0` removes it in that frame). The page writes `<img id="moku-boot">` before `#game`, centred, above the canvas; the build copies it beside the page like the icons. With `frame: { width, height }` and `rect: { x, y, width, height }` the picture stands where the game draws it instead: `frame` is the canvas the place is given in, laid over the game frame like CSS `cover`, `rect` the picture on it; the game frame is fitted with `aspect` (`{ min: 4 / 3, max: 21 / 9 }`, the renderer's default: a game with its own `renderer.aspect` repeats it here) and `orientation` (`page.orientation` when it is `"portrait"` or `"landscape"`, else `"portrait"`: a landscape game with `"any"` sets it). `width` is not read then, and `image` must be a `.png` or `.webp`. The CSS reads the window as `100vw` × `100vh`, the box the renderer measures in a native WebView and a desktop window; in a mobile browser tab with a collapsing toolbar `100vh` can be taller, and the picture stands a little off. A native build with a placement gets `app.launch`: the shell shows the same picture at the same place before the page exists (Android 11 and later, with no system splash icon; not yet iOS) and drops it when the page calls `globalThis.__mokuLaunch.ready()` in the first scene frame |
 | `native` | none | `{ name, identifier, icon?, targets?, signing?, ios?, dev? }`. Left out, the game has no native build. See [Store builds](#store-builds) and [The test app](#the-test-app) |
 | `system` | `[]` | The system plugins the shell wires: `lifecycle`, `back`, `haptics`, `keepAwake`, `store` |
 | `save` | `"memory"` | `"memory"`, `"local"` or `"store"` |
@@ -226,6 +226,15 @@ A value TypeScript would refuse, in a file that skips `satisfies`, stops `moku-g
 - `[game] moku-game: page.boot.width "40vmin; color: red" is not a CSS length.`
 - `[game] config.page.boot has no image.` with `Name a picture file of the game in page.boot.image.`
 - `[game] config.page.boot.fadeMs is -1.` with `Use a number of milliseconds, 0 or more.`
+- `[game] config.page.boot has a frame but no rect.`, and `has a rect but no frame.`: the two come together.
+- `[game] config.page.boot.frame is 7.` with `Use { width, height }.`, and the same for `rect` (`{ x, y, width, height }`) and `aspect` (`{ min, max }`).
+- `[game] config.page.boot.frame.width is 0.` with `Use a finite number of 0.000001 or more.`, and the same for `frame.height`, `rect.width`, `rect.height` and `aspect.min`: a smaller size prints as `0` in the CSS. A missing one reads `is undefined.`, an array `is ["5"].`
+- `[game] config.page.boot.rect.x is -1.` with `Use a finite number of 0 or more.`, and the same for `rect.y`.
+- `[game] config.page.boot.rect ends at x 1025, past frame.width 1024.` with `Keep the rect inside page.boot.frame.`, and the same at `y` past `frame.height`.
+- `[game] config.page.boot.aspect.max is 0.3.` with `Use a finite number of aspect.min (0.4) or more.`
+- `[game] config.page.boot.orientation is "any".` with `Use "portrait" or "landscape".`
+- `[game] config.page.boot.aspect is set without a frame.`, and the same for `orientation`.
+- `[game] config.page.boot.image "assets/boot.jpg" is not a .png or .webp file.`: with a `frame`, since the native launch still takes only those.
 - `[game] build: page.boot.image and page.icons.favicon share the name "icon.png" beside the page.`: two files Bun left in the game would land on one name beside the built page.
 
 ## The page
@@ -293,7 +302,7 @@ A store save that cannot be read rejects the load: `[game] The save could not be
 | Package | When | Install |
 |---|---|---|
 | `@moku-labs/system` | `config.ts` names a `system` plugin, or `save` is `"store"` | `bun add @moku-labs/system@^0.3.1` |
-| `@moku-labs/native` | `moku-game native …` | `bun add -d @moku-labs/native@^0.3.13` |
+| `@moku-labs/native` | `moku-game native …` | `bun add -d @moku-labs/native@^0.3.18` |
 
 The page imports the shell only when the game needs it. The generated `main.ts` then imports `systemShellOf` from `@moku-labs/game/app/system` and passes `systemShellOf({ ... })` to `startPage`. It writes one `import()` for the package and one per named plugin, in the order `lifecycle`, `back`, `haptics`, `keepAwake`, `store`; the store when `system` names it or `save` is `"store"`. The engine holds no `import()` of the package, so the page bundles only the named plugins. A game with `system: ["haptics"]` and a memory save builds without `@tauri-apps/plugin-store`.
 
