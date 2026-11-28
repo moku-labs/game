@@ -58,7 +58,7 @@ import {
 } from "./pools";
 import { isLeaving, parentOf } from "./pose";
 import { drawShapePath, isEmptyArc, paintShape } from "./shape-path";
-import { isShapeSprite, type ShapeSprite, shapeSpriteClass, writeShape } from "./shape-sprite";
+import { isShapeView, type ShapeView, shapeViewClass } from "./shape-view";
 import { anchoredBoxInto, boxInto, createSpriteLayout, layoutSpriteInto } from "./sizing";
 import {
   clearFrames,
@@ -263,7 +263,7 @@ export function visualOf(sctx: SyncCtx, entity: Entity): Visual | undefined {
   }
 
   if (ecs.has(entity, Shape)) {
-    // SPIKE hot path 5: `hollow` marks a shape drawn by the shape batcher.
+    // SPIKE hot path 5: `hollow` marks a shape drawn as a shape view.
     found.push({
       kind: "Shape",
       textureKey: "",
@@ -1122,17 +1122,17 @@ function drawShape(
   }
 }
 
-/** SPIKE hot path 5: what the shape batcher wrote, for the walk. */
+/** SPIKE hot path 5: what the shape views wrote, for the walk. */
 const sdfStats = { writes: 0, made: 0 };
 
 (globalThis as { __hpShapeStats?: () => typeof sdfStats }).__hpShapeStats = () => sdfStats;
 
 /**
- * SPIKE hot path 5: whether a shape is drawn by the shape batcher: the walk's switch is on, and it is an arc or a
+ * SPIKE hot path 5: whether a shape is drawn as a shape view: the walk's switch is on, and it is an arc or a
  * rounded or stroked rectangle without a dash.
  *
  * @param value - The shape value.
- * @returns True for a shape the batcher draws.
+ * @returns True for a shape a shape view draws.
  */
 function drawnBySdf(value: Readonly<ShapeValue> | undefined): boolean {
   const flags = globalThis as { __hpShape?: boolean; location?: { search: string } };
@@ -1146,26 +1146,26 @@ function drawnBySdf(value: Readonly<ShapeValue> | undefined): boolean {
 }
 
 /**
- * SPIKE hot path 5: writes a shape's numbers onto its sprite when they differ from the ones drawn last, and its tint.
+ * SPIKE hot path 5: writes a shape onto its view when it differs from the one drawn last, and its tint.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
  * @param view - Its view.
- * @param object - Its shape sprite.
+ * @param object - Its shape view.
  * @param value - The shape value.
  */
 function drawSdfShape(
   sctx: SyncCtx,
   entity: Entity,
   view: View,
-  object: ShapeSprite,
+  object: ShapeView,
   value: Readonly<ShapeValue>
 ): void {
   const tinted = value.strokeWidth <= 0;
 
   if (!sameShape(view.drawn, value, tinted)) {
     markView(sctx, entity);
-    writeShape(object, value, tinted ? WHITE : value.fill);
+    object.draw(value, tinted ? WHITE : value.fill);
     sdfStats.writes += 1;
     view.drawn = copyShape(view.drawn, value, tinted);
   }
@@ -1209,7 +1209,7 @@ export function applyShape(sctx: SyncCtx, entity: Entity, view: View): void {
 
   if (value === undefined) return;
 
-  if (isShapeSprite(object)) {
+  if (isShapeView(object)) {
     const blank = isEmptyShape(value);
 
     setHidden(sctx, entity, view, "empty", blank);
@@ -1636,7 +1636,7 @@ function makeObject(sctx: SyncCtx, entity: Entity, visual: Visual): BuiltObject 
   if (visual.kind === "Shape")
     return {
       object: visual.hollow
-        ? new (shapeSpriteClass(sctx.ctx.state.sync, pixi))()
+        ? new (shapeViewClass(sctx.ctx.state.sync, pixi))()
         : new pixi.Graphics(),
       value: undefined
     };

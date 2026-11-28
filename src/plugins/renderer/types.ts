@@ -53,6 +53,7 @@ export type PixiModule = Pick<
   typeof import("pixi.js"),
   | "AlphaFilter"
   | "Application"
+  | "BatchableGraphics"
   | "Batcher"
   | "BatcherPipe"
   | "BitmapFont"
@@ -99,6 +100,7 @@ export type PixiModule = Pick<
   | "Texture"
   | "TexturePool"
   | "UniformGroup"
+  | "ViewContainer"
   | "bitmapFontTextParser"
   | "bitmapFontXMLStringParser"
   | "colorBit"
