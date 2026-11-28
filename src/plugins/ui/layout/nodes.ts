@@ -202,10 +202,12 @@ export function freeNode(state: LayoutState, element: Element): void {
 
   // A measured node is marked dirty while it still has its function (Yoga refuses it on any other node): the size
   // Yoga cached for this element is not served to the next one.
-  if (aside && state.measuring.has(node)) node.markDirty();
-  // eslint-disable-next-line unicorn/no-null -- Yoga clears a measure function with null.
-  node.setMeasureFunc(null);
-  state.measuring.delete(node);
+  const measured = state.measuring.delete(node);
+
+  if (aside && measured) node.markDirty();
+  // Only a node in `measuring` holds a function; `unsetMeasureFunc` is what `setMeasureFunc(null)` calls, without the
+  // argument copies of the wrapper (56 B a call), as `measure` clears one.
+  if (measured) node.unsetMeasureFunc();
   forgetPlaced(state, node);
   if (aside) {
     removeChildren(node);

@@ -79,7 +79,7 @@ function lengthOf(
  * @returns The same shape with numbers only.
  * @example
  * ```ts
- * edgesOf({ top: "safeArea.top" }, { top: 44, right: 0, bottom: 0, left: 0 }); // { top: 44 }
+ * edgesOf({ top: "safeArea.top" }, { top: 44, right: 0, bottom: 0, left: 0 }).top; // 44
  * ```
  */
 function edgesOf(
@@ -89,16 +89,14 @@ function edgesOf(
   if (edges === undefined) return undefined;
   if (typeof edges === "number" || typeof edges === "string") return lengthOf(edges, safeArea);
 
-  const resolved: { top?: number; right?: number; bottom?: number; left?: number } = {};
-
-  for (const edge of ["top", "right", "bottom", "left"] as const) {
-    const value = lengthOf(edges[edge], safeArea);
-
-    if (value !== undefined) resolved[edge] = value;
-  }
-
-  // Frozen with the style that holds it: a kept resolution is shared by every element of one style object.
-  return Object.freeze(resolved);
+  // One literal of one shape, an edge the style left out held as `undefined`, as the layout and its JSON compare read
+  // it. Frozen with the style that holds it: a kept resolution is shared by every element of one style object.
+  return Object.freeze({
+    top: lengthOf(edges.top, safeArea),
+    right: lengthOf(edges.right, safeArea),
+    bottom: lengthOf(edges.bottom, safeArea),
+    left: lengthOf(edges.left, safeArea)
+  }) as ResolvedStyle["padding"];
 }
 
 /**
