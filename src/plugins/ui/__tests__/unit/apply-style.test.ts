@@ -467,16 +467,19 @@ describe("the spare nodes: a freed node taken back by the next element (hp-2ab)"
     let made = 0;
     const create = yoga.Node.create.bind(yoga.Node);
 
+    let second: ReturnType<typeof nodeOf>;
+
     yoga.Node.create = (...rest: Parameters<typeof create>) => {
       made += 1;
 
       return create(...rest);
     };
-    freeNode(state, { entity: 1 } as Element);
-
-    const second = nodeOf(state, 2);
-
-    yoga.Node.create = create;
+    try {
+      freeNode(state, { entity: 1 } as Element);
+      second = nodeOf(state, 2);
+    } finally {
+      yoga.Node.create = create;
+    }
     expect(second).toBe(first);
     expect(made).toBe(0);
     expect(state.spare.length).toBe(0);

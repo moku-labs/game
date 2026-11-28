@@ -121,7 +121,9 @@ function merge(
   for (const field in source) {
     const value = source[field];
 
-    if (value !== undefined && (keepsText || field !== "text")) into[field] = value;
+    const merged = value !== undefined && (keepsText || field !== "text");
+
+    if (merged) into[field] = value;
   }
 }
 
@@ -158,14 +160,19 @@ function mergeVariants(
 ): void {
   const { is, when } = style;
 
-  if (when !== undefined)
-    for (const name of WHEN_ORDER) if (flags[name]) merge(into, when[name], true);
+  if (when !== undefined) {
+    for (const name of WHEN_ORDER) {
+      if (flags[name]) merge(into, when[name], true);
+    }
+  }
+
   if (is === undefined) return;
 
   for (const name of IS_ORDER) {
     const pointer = name === "hover" || name === "pressed";
+    const skipped = flags.disabled && pointer;
 
-    if (flags[name] && !(flags.disabled && pointer)) merge(into, is[name], false);
+    if (flags[name] && !skipped) merge(into, is[name], false);
   }
 }
 

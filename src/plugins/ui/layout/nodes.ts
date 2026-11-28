@@ -195,6 +195,7 @@ export function freeNode(state: LayoutState, element: Element): void {
 
   if (node === undefined) return;
 
+  // Out of the parent first, then see whether the node is put aside.
   detachNode(state, element);
 
   const kept = state.kept.get(node);
@@ -205,15 +206,23 @@ export function freeNode(state: LayoutState, element: Element): void {
   const measured = state.measuring.delete(node);
 
   if (aside && measured) node.markDirty();
+
   // Only a node in `measuring` holds a function; `unsetMeasureFunc` is what `setMeasureFunc(null)` calls, without the
   // argument copies of the wrapper (56 B a call), as `measure` clears one.
   if (measured) node.unsetMeasureFunc();
+
+  // Put aside for the next element, or freed for good.
   forgetPlaced(state, node);
+
   if (aside) {
     removeChildren(node);
     state.spare.push(node);
     state.spareKept.push(kept);
-  } else node.free();
+  } else {
+    node.free();
+  }
+
+  // The element no longer owns a node.
   state.kept.delete(node);
   state.byEntity.delete(element.entity);
   state.nodes -= 1;
