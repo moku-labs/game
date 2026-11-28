@@ -14,8 +14,10 @@ import { type CachedImage, cacheKey, readCache, sha256, writeCache } from "./cac
 import { type Copied, copyAudio, copyFont, copyLoose, extensionOf, readSource } from "./copy";
 import { type Encoder, loadEncoder, type PagePart, type Pixels } from "./encode";
 import { type Group, planGroups } from "./groups";
-import { type Boxed, type LayoutFrame, type LayoutPage, layoutGroup, type Trim } from "./layout";
+import { type Boxed, type LayoutFrame, layoutGroup, type Trim } from "./layout";
 import { contentHash, looseName, pageId, pageName } from "./names";
+import { recordTwin, type Twins, twinNotes } from "./notes";
+import { splitRepeats, withRepeats } from "./repeats";
 import { cropPixels, trimBox } from "./trim";
 
 /**
@@ -73,7 +75,7 @@ type PackRun = {
   problems: string[];
   cacheHits: number;
   /** SHA-256 of a texture source to every texture read with those bytes, in reading order. */
-  twins: Map<string, { key: string; bundle: string; width: number; height: number }[]>;
+  twins: Twins;
 };
 
 /** The pack folder keeps a file of this name even when the manifest goes elsewhere. */
@@ -254,57 +256,6 @@ async function decodeGroup(run: PackRun, members: readonly Source[]): Promise<Cu
   }
 
   return cuts;
-}
-
-/**
- * Tells the cuts that go to the layout from the ones that repeat the pixels of an earlier cut. A
- * repeat is laid out with the cut it repeats: its key gets the same rectangle of the page.
- *
- * @param cuts - The cuts of a group, in key order.
- * @returns The cuts to lay out, and each repeat under the key of the cut it repeats.
- */
-function splitRepeats(cuts: readonly Cut[]): { first: Cut[]; repeats: Map<string, Cut[]> } {
-  const seen = new Map<string, Cut>();
-  const first: Cut[] = [];
-  const repeats = new Map<string, Cut[]>();
-
-  for (const cut of cuts) {
-    const print = `${cut.pixels.width}x${cut.pixels.height}:${sha256(cut.pixels.data)}`;
-    const earlier = seen.get(print);
-
-    if (earlier === undefined) {
-      seen.set(print, cut);
-      first.push(cut);
-      continue;
-    }
-
-    repeats.set(earlier.source.key, [...(repeats.get(earlier.source.key) ?? []), cut]);
-  }
-
-  return { first, repeats };
-}
-
-/**
- * Gives every repeat a frame on the rectangle of the cut it repeats, with the repeat's own trim.
- *
- * @param page - A page of the layout, with one frame per laid-out cut.
- * @param repeats - The repeats, under the key of the cut each one repeats.
- * @returns The page with the frames of the repeats added, sorted by key.
- */
-function withRepeats(page: LayoutPage, repeats: ReadonlyMap<string, readonly Cut[]>): LayoutPage {
-  const frames = page.frames.flatMap(frame => [
-    frame,
-    ...(repeats.get(frame.key) ?? []).map(cut => ({
-      key: cut.source.key,
-      x: frame.x,
-      y: frame.y,
-      width: frame.width,
-      height: frame.height,
-      ...cut.trim
-    }))
-  ]);
-
-  return { ...page, frames: frames.toSorted((left, right) => left.key.localeCompare(right.key)) };
 }
 
 /**
@@ -632,32 +583,8 @@ async function packLoose(
 }
 
 /**
- * Writes one line per group of textures that were read with the same bytes under different keys.
- *
- * @param twins - SHA-256 of a source to the textures read with those bytes.
- * @returns The lines, sorted by the first key of each group.
- */
-function twinNotes(twins: PackRun["twins"]): string[] {
-  return [...twins.values()]
-    .filter(group => group.length > 1)
-    .map(group => group.toSorted((left, right) => left.key.localeCompare(right.key)))
-    .toSorted((left, right) => (left[0]?.key ?? "").localeCompare(right[0]?.key ?? ""))
-    .map(group => {
-      const [one] = group;
-      const keys = group.map(entry => `"${entry.key}"`).join(", ");
-      const bundles = [...new Set(group.map(entry => entry.bundle))].map(name => `"${name}"`);
-      const size = one === undefined ? "" : `${one.width}×${one.height}`;
-      const mb = one === undefined ? 0 : textureMb(one.width, one.height);
-
-      return (
-        `the same picture (${size}, ${mb} MB a copy) is packed under ${group.length} keys: ` +
-        `${keys}, in ${bundles.length === 1 ? "bundle" : "bundles"} ${bundles.join(", ")}.`
-      );
-    });
-}
-
-/**
- * Packs one bundle: its atlas groups become pages, the rest is written loose or copied.
+ * Packs one bundle: its atlas groups become pages, the rest is written loose or copied. Every
+ * texture it reads is remembered by its bytes, for the notes of the pack.
  *
  * @param run - The pack run, which collects the files to write.
  * @param name - Name of the bundle.
@@ -672,9 +599,8 @@ async function packBundle(
   const sources = await readTextures(run, bundle);
   const plan = planGroups(sources);
 
-  for (const { key, sha, width, height } of sources) {
-    run.twins.set(sha, [...(run.twins.get(sha) ?? []), { key, bundle: name, width, height }]);
-  }
+  // Remember every texture by the hash of its bytes, for the notes of the same file under two keys.
+  for (const source of sources) recordTwin(run.twins, name, source);
 
   // The atlas groups first, then what stays a file of its own: what the plan kept out of a group.
   const packed = await packGroups(run, name, plan.groups);

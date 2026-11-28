@@ -572,7 +572,7 @@ preload, no event and no budget work.
 | `inspect.ts` | The `game.assets` source of the `/inspect` door. |
 | `browser.ts` | The default io: the global `fetch`, `createImageBitmap`, `renderer.sync.textures` (`create`, `slice`, `destroy`). |
 | `scan/` | Build time only, reachable through `@moku-labs/game/assets`: the walk, the key rule, the image and font readers, the two emitters and the CLI. |
-| `scan/pack/` | Build time only: the production packer behind `--pack` (`pack`, `groups`, `layout`, `trim`, `encode`, `names`, `cache`, `copy`). The only place that imports `sharp` and `maxrects-packer` (lint rule L11). |
+| `scan/pack/` | Build time only: the production packer behind `--pack` (`pack`, `groups`, `layout`, `trim`, `encode`, `names`, `cache`, `copy`, `repeats`, `notes`). The only place that imports `sharp` and `maxrects-packer` (lint rule L11). |
 
 ## What the scanner reads
 
@@ -654,7 +654,7 @@ pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".
 | Padding | 2 px between frames and a 2 px border. Each frame's edge pixels are copied 1 px out into it (extrude), so a picture drawn at a fractional place samples its own edge, never transparent black (F105); the rest stays transparent. |
 | Trim | A texture that is not a nine-slice is cut to its visible pixels (alpha above 0), grown by 1 px on each side where the image has room: the margin keeps one transparent row or column at a cut edge, so bilinear sampling at the edge of the sprite reads transparent as before. A fully transparent image keeps a 1×1 frame at 0, 0. The manifest's `atlas` records `offsetX`, `offsetY`, `origWidth`, `origHeight`, only when the cut is smaller than the image. A texture with `nine` is never trimmed, and a loose file is not trimmed. |
 | Same pictures | Two textures of one group whose cuts hold the same pixels are laid out once: each key gets a frame on the same rectangle of the page, with its own trim fields and its own `nine`, and the pixels are drawn once. A copy of a picture inside a bundle costs no page area. Loose files are not compared. |
-| Same files | A texture file read with the same bytes under two or more keys, in one bundle or in several, is named in a note after the summary line of `--pack`: its keys, its bundles, its size and the MB of one copy (`PackResult.notes`). The pack does not fail on it: a copy in another bundle is still packed there, and the game decides which key to keep. |
+| Same files | A texture file read with the same bytes under two or more keys, in one bundle or in several, is named in a note after the summary line of `--pack`: its keys, its bundles, its size and the MB of one copy (`PackResult.notes`). The pack does not fail on it: a copy in another bundle is still packed there, and the game decides which key to keep. Two copies inside one atlas group share a frame (the row above) and are still named. |
 | Rotation | Never. |
 | Loose by size | A `main` texture with a header side above `LOOSE_SIDE` (1018 px) stays a file of its own and is not laid out; the cap is far below a page (2042 px), so a `main` texture always fits one. The header size decides the group, so a cache hit decodes nothing. |
 | Loose by mipmaps | A texture with `mips` stays a file of its own, whatever its key or size: Pixi builds the full chain, and from the second level on the neighbours on a page would bleed into it. The pack check refuses a mipmapped frame. The packed bundle keeps `parent`, `dir` and `release`; a loose mipmapped file keeps `mips` and its chain `mb`. |

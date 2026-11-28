@@ -227,6 +227,42 @@ describe("packAssets, identical pictures of a bundle", () => {
     });
   });
 
+  it("shares the rectangle of a trimmed file and of a file that is already its cut, whichever key comes first", async () => {
+    // Bug caught: a repeat without a trim takes the trim of the cut it repeats, or loses its own.
+    const inner = picture(30, 20, 4);
+    const wide = framed(
+      inner,
+      { width: 30, height: 20 },
+      { left: 12, top: 5, right: 3, bottom: 9 }
+    );
+    const cut = framed(inner, { width: 30, height: 20 }, { left: 1, top: 1, right: 1, bottom: 1 });
+    const trimmed = await png(wide.width, wide.height, wide.data);
+    const whole = await png(cut.width, cut.height, cut.data);
+    const wholeFirst = await packTree({
+      "features/ui/assets/a.png": whole,
+      "features/ui/assets/b.png": trimmed
+    });
+    const trimmedFirst = await packTree({
+      "features/ui/assets/a.png": trimmed,
+      "features/ui/assets/b.png": whole
+    });
+
+    for (const [manifest, wholeKey, trimmedKey] of [
+      [wholeFirst.manifest, "ui.a", "ui.b"],
+      [trimmedFirst.manifest, "ui.b", "ui.a"]
+    ] as const) {
+      expect(rectOf(manifest, wholeKey)).toEqual(rectOf(manifest, trimmedKey));
+      expect(entryOf(manifest, wholeKey).atlas).not.toHaveProperty("offsetX");
+      expect(entryOf(manifest, wholeKey).atlas).not.toHaveProperty("origWidth");
+      expect(entryOf(manifest, trimmedKey).atlas).toMatchObject({
+        offsetX: 11,
+        offsetY: 4,
+        origWidth: wide.width,
+        origHeight: wide.height
+      });
+    }
+  });
+
   it("lets a nine-slice and a plain texture with the same pixels share a frame, and the nine-slice keeps its borders", async () => {
     // Bug caught: the shared frame is written from the first key's entry and the borders are lost.
     const same = await png(48, 48, picture(48, 48, 6));
@@ -291,8 +327,21 @@ describe("packAssets, the same file under two keys", () => {
     });
 
     expect(notes).toEqual([
-      'the same picture (16×16, 0.001 MB a copy) is packed under 3 keys: "board.dot", "ui.dot", "ui.dot-copy", in bundles "board", "ui".',
-      'the same picture (64×32, 0.008 MB a copy) is packed under 2 keys: "shop.close", "ui.close", in bundles "shop", "ui".'
+      'the same file (16×16, 0.001 MB) is kept under 3 keys: "board.dot", "ui.dot", "ui.dot-copy", in bundles "board", "ui".',
+      'the same file (64×32, 0.008 MB) is kept under 2 keys: "shop.close", "ui.close", in bundles "shop", "ui".'
+    ]);
+  });
+
+  it("names a loose file kept twice too: the bytes are compared, not the frames", async () => {
+    // Bug caught: the compare runs on atlas members only, and the largest copies go unnamed.
+    const big = await png(1100, 8, picture(1100, 8, 5));
+    const { notes } = await packTree({
+      "features/ui/assets/sky.png": big,
+      "features/shop/assets/sky.png": big
+    });
+
+    expect(notes).toEqual([
+      'the same file (1100×8, 0.034 MB) is kept under 2 keys: "shop.sky", "ui.sky", in bundles "shop", "ui".'
     ]);
   });
 
@@ -328,7 +377,7 @@ describe("packAssets, the same file under two keys", () => {
 
     expect(summary).toBeGreaterThan(-1);
     expect(lines[summary + 1]).toBe(
-      'warn the same picture (64×32, 0.008 MB a copy) is packed under 2 keys: "shop.close", "ui.close", in bundles "shop", "ui".'
+      'warn the same file (64×32, 0.008 MB) is kept under 2 keys: "shop.close", "ui.close", in bundles "shop", "ui".'
     );
   });
 });
