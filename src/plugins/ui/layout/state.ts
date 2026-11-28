@@ -58,6 +58,8 @@ export function createLayoutState(): LayoutState {
     placed: emptyMap(),
     parents: emptyMap(),
     measuring: emptyMap(),
+    spare: [],
+    spareKept: [],
     livePatches: emptyMap(),
     restValues: emptyMap(),
     nodes: 0,

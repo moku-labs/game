@@ -102,7 +102,8 @@ function edgesOf(
 }
 
 /**
- * Merges one variant over what is there. Shallow, as the framework merges configs.
+ * Merges one variant over what is there: shallow, as the framework merges configs, a field the variant holds as
+ * `undefined` left out. A for-in over the variant, with no rest copy and no entries array.
  *
  * @param into - The style built so far.
  * @param variant - The variant to lay over it.
@@ -113,40 +114,107 @@ function edgesOf(
 function merge(
   into: Record<string, unknown>,
   variant: BaseStyle | undefined,
-  keepsText = true
+  keepsText: boolean
 ): void {
   if (variant === undefined) return;
 
-  for (const [field, value] of Object.entries(variant)) {
+  const source = variant as Record<string, unknown>;
+
+  for (const field in source) {
+    const value = source[field];
+
     if (value !== undefined && (keepsText || field !== "text")) into[field] = value;
   }
 }
 
 /**
+ * Merges the base of a style: every field but its two variant tables.
+ *
+ * @param into - The empty style the merge builds.
+ * @param style - The style a game wrote.
+ */
+function mergeBase(into: Record<string, unknown>, style: Style | TextTagStyle): void {
+  const source = style as Record<string, unknown>;
+
+  for (const field in source) {
+    if (field === "is" || field === "when") continue;
+
+    const value = source[field];
+
+    if (value !== undefined) into[field] = value;
+  }
+}
+
+/**
+ * Lays the `when` variants of the flags that hold over the base, then the `is` variants. While `disabled` holds the
+ * `hover` and `pressed` variants are skipped: a disabled element answers no pointer.
+ *
+ * @param into - The base, merged.
+ * @param style - The style a game wrote.
+ * @param flags - The flags of the frame and of the element.
+ */
+function mergeVariants(
+  into: Record<string, unknown>,
+  style: Style | TextTagStyle,
+  flags: StyleFlags
+): void {
+  const { is, when } = style;
+
+  if (when !== undefined)
+    for (const name of WHEN_ORDER) if (flags[name]) merge(into, when[name], true);
+  if (is === undefined) return;
+
+  for (const name of IS_ORDER) {
+    const pointer = name === "hover" || name === "pressed";
+
+    if (flags[name] && !(flags.disabled && pointer)) merge(into, is[name], false);
+  }
+}
+
+/**
+ * The padding or margin a resolution hands out. Frozen edges with numbers only, as `defineStyle` leaves them, go as
+ * they are; edges a game wrote inline, or that hold a safe-area token, are copied and frozen, so no element can write
+ * into another element's edges.
+ *
+ * @param edges - What the merged style holds.
+ * @param safeArea - The insets of the viewport.
+ * @returns The edges with numbers only.
+ */
+function resolvedEdges(edges: Edges, safeArea: ViewportSize["safeArea"]): ResolvedStyle["padding"] {
+  if (typeof edges !== "object") return lengthOf(edges, safeArea);
+
+  const sides = edges as Record<string, unknown>;
+  const numbers =
+    typeof sides.top !== "string" &&
+    typeof sides.right !== "string" &&
+    typeof sides.bottom !== "string" &&
+    typeof sides.left !== "string";
+
+  return numbers && Object.isFrozen(edges)
+    ? (edges as ResolvedStyle["padding"])
+    : edgesOf(edges, safeArea);
+}
+
+/**
  * Replaces every safe-area token of a merged style with the number of this viewport.
  *
- * @param merged - The style after the variants were laid over the base.
+ * @param merged - The style after the variants were laid over the base; it holds no `undefined`.
  * @param viewport - What `renderer.viewport.size()` answered.
  * @returns The same object, with numbers where the tokens were.
  */
 function withSafeArea(merged: Record<string, unknown>, viewport: ViewportSize): ResolvedStyle {
-  const resolved = merged as ResolvedStyle & Record<string, unknown>;
+  const safeArea = viewport.safeArea;
 
-  for (const edge of ["padding", "margin"] as const) {
-    const value = edgesOf(merged[edge] as Edges | undefined, viewport.safeArea);
+  if (merged.padding !== undefined)
+    merged.padding = resolvedEdges(merged.padding as Edges, safeArea);
+  if (merged.margin !== undefined) merged.margin = resolvedEdges(merged.margin as Edges, safeArea);
+  if (typeof merged.left === "string") merged.left = lengthOf(merged.left as Length, safeArea);
+  if (typeof merged.top === "string") merged.top = lengthOf(merged.top as Length, safeArea);
+  if (typeof merged.right === "string") merged.right = lengthOf(merged.right as Length, safeArea);
+  if (typeof merged.bottom === "string")
+    merged.bottom = lengthOf(merged.bottom as Length, safeArea);
 
-    if (value === undefined) delete resolved[edge];
-    else resolved[edge] = value;
-  }
-
-  for (const edge of ["left", "top", "right", "bottom"] as const) {
-    const value = lengthOf(merged[edge] as Length | undefined, viewport.safeArea);
-
-    if (value === undefined) delete resolved[edge];
-    else resolved[edge] = value;
-  }
-
-  return resolved;
+  return merged as ResolvedStyle;
 }
 
 /**
@@ -176,97 +244,10 @@ export function resolve(
 ): ResolvedStyle {
   const merged: Record<string, unknown> = {};
 
-  if (style !== undefined && ((globalThis as { __hp2ab?: boolean }).__hp2ab ?? (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.HP2AB === "1") === true) {
-    return Object.freeze(spikeResolve(merged, style, flags, viewport));
-  }
-
   if (style !== undefined) {
-    const { is, when, ...base } = style;
-
-    merge(merged, base);
-
-    for (const name of WHEN_ORDER) if (flags[name]) merge(merged, when?.[name]);
-    for (const name of IS_ORDER) {
-      // A disabled element answers no pointer, so it never shows hover or pressed.
-      const pointer = name === "hover" || name === "pressed";
-
-      if (!flags[name] || (flags.disabled && pointer)) continue;
-
-      merge(merged, is?.[name], false);
-    }
+    mergeBase(merged, style);
+    mergeVariants(merged, style, flags);
   }
 
   return Object.freeze(withSafeArea(merged, viewport));
-}
-
-/** SPIKE hp-2ab: the same merge with no rest copy, no entries array, and the edges rebuilt only for a token. */
-function spikeResolve(
-  merged: Record<string, unknown>,
-  style: Style | TextTagStyle,
-  flags: StyleFlags,
-  viewport: ViewportSize
-): ResolvedStyle {
-  const source = style as Record<string, unknown>;
-
-  for (const field in source) {
-    if (field === "is" || field === "when") continue;
-
-    const value = source[field];
-
-    if (value !== undefined) merged[field] = value;
-  }
-
-  const { is, when } = style;
-
-  if (when !== undefined) for (const name of WHEN_ORDER) if (flags[name]) spikeMerge(merged, when[name], true);
-  if (is !== undefined) {
-    for (const name of IS_ORDER) {
-      const pointer = name === "hover" || name === "pressed";
-
-      if (!flags[name] || (flags.disabled && pointer)) continue;
-
-      spikeMerge(merged, is[name], false);
-    }
-  }
-
-  const safeArea = viewport.safeArea;
-
-  for (const edge of ["padding", "margin"] as const) {
-    const value = merged[edge];
-
-    if (typeof value === "string") merged[edge] = lengthOf(value as Length, safeArea);
-    else if (typeof value === "object" && value !== null) {
-      const sides = value as Record<string, unknown>;
-
-      if (
-        typeof sides.top === "string" ||
-        typeof sides.right === "string" ||
-        typeof sides.bottom === "string" ||
-        typeof sides.left === "string"
-      ) {
-        merged[edge] = edgesOf(value as Edges, safeArea);
-      }
-    }
-  }
-
-  for (const edge of ["left", "top", "right", "bottom"] as const) {
-    const value = merged[edge];
-
-    if (typeof value === "string") merged[edge] = lengthOf(value as Length, safeArea);
-  }
-
-  return merged as ResolvedStyle;
-}
-
-/** SPIKE hp-2ab: `merge` with a for-in. */
-function spikeMerge(into: Record<string, unknown>, variant: BaseStyle | undefined, keepsText: boolean): void {
-  if (variant === undefined) return;
-
-  const source = variant as Record<string, unknown>;
-
-  for (const field in source) {
-    const value = source[field];
-
-    if (value !== undefined && (keepsText || field !== "text")) into[field] = value;
-  }
 }

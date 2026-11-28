@@ -24,6 +24,7 @@ import { stopFields } from "./jsx/fields";
 import { hostsMoved } from "./jsx/hosts";
 import type { AnyComponentDefinition, JsxModule } from "./jsx/types";
 import { createGuidePass, guardPointer } from "./layout/guide";
+import { freeSpare } from "./layout/nodes";
 import type { LayoutModule } from "./layout/types";
 import type { Deps, KernelSlice, State, UiCtx } from "./types";
 
@@ -267,6 +268,9 @@ export function stopUi(state: State): void {
     node.setMeasureFunc(null);
     node.free();
   }
+
+  // The nodes put aside go with the Yoga module that made them.
+  freeSpare(state.layout);
 
   // Forget everything the modules kept, so a second start begins empty.
   state.layout.byEntity.clear();
