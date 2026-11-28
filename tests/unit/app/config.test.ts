@@ -29,6 +29,28 @@ function nativeWith(part: object): GameConfig {
   } as GameConfig;
 }
 
+/** The frame of the worked placement: the splash art of A Memory Missing. */
+const placedFrame = { width: 1024, height: 1536 };
+
+/** Where the still lies on that frame. */
+const placedRect = { x: 215, y: 402, width: 600, height: 640 };
+
+/**
+ * The first line of the error a run throws.
+ *
+ * @param run - What throws.
+ * @returns The line, or `"no error"` when nothing was thrown.
+ */
+function firstLineOf(run: () => unknown): string {
+  try {
+    run();
+  } catch (error) {
+    return String((error as Error).message).split("\n")[0] ?? "";
+  }
+
+  return "no error";
+}
+
 describe("resolveConfig", () => {
   it("fills every default of a config with a title only", () => {
     expect(resolveConfig({ page: { title: "T" } })).toEqual({
@@ -154,6 +176,204 @@ describe("resolveConfig", () => {
         )
       );
     }
+  });
+
+  // Bug: a placed boot loses its place, gets no aspect, or keeps "any" as an orientation the CSS cannot read.
+  it("a page.boot with frame and rect resolves place with the default aspect and the orientation fallback", () => {
+    const boot = {
+      image: "assets/splash/studio.webp",
+      frame: placedFrame,
+      rect: placedRect
+    };
+
+    expect(
+      resolveConfig({ page: { title: "T", orientation: "any", boot } }).page.boot?.place
+    ).toEqual({
+      frame: placedFrame,
+      rect: placedRect,
+      aspect: { min: 4 / 3, max: 21 / 9 },
+      orientation: "portrait"
+    });
+    expect(
+      resolveConfig({ page: { title: "T", orientation: "landscape", boot } }).page.boot?.place
+        ?.orientation
+    ).toBe("landscape");
+
+    const own = { ...boot, aspect: { min: 0.4, max: 2.6 }, orientation: "landscape" as const };
+
+    expect(resolveConfig({ page: { title: "T", boot: own } }).page.boot?.place).toMatchObject({
+      aspect: { min: 0.4, max: 2.6 },
+      orientation: "landscape"
+    });
+    expect(
+      "place" in (resolveConfig({ page: { title: "T", boot: { image: "b.jpg" } } }).page.boot ?? {})
+    ).toBe(false);
+  });
+
+  // Bug: a broken placement reaches the page as a still in the wrong place, or as a bare TypeError.
+  it.each([
+    [
+      "a frame with no rect",
+      { frame: placedFrame },
+      "[game] config.page.boot has a frame but no rect."
+    ],
+    [
+      "a rect with no frame",
+      { rect: placedRect },
+      "[game] config.page.boot has a rect but no frame."
+    ],
+    [
+      "a frame that is no object",
+      { frame: 7, rect: placedRect },
+      "[game] config.page.boot.frame is 7."
+    ],
+    [
+      "a rect that is no object",
+      { frame: placedFrame, rect: "x" },
+      '[game] config.page.boot.rect is "x".'
+    ],
+    [
+      "a frame without a height",
+      { frame: { width: 1024 }, rect: placedRect },
+      "[game] config.page.boot.frame.height is undefined."
+    ],
+    [
+      "a frame width of 0",
+      { frame: { ...placedFrame, width: 0 }, rect: placedRect },
+      "[game] config.page.boot.frame.width is 0."
+    ],
+    [
+      "a rect height that is not finite",
+      { frame: placedFrame, rect: { ...placedRect, height: Number.POSITIVE_INFINITY } },
+      "[game] config.page.boot.rect.height is Infinity."
+    ],
+    [
+      "a negative rect x",
+      { frame: placedFrame, rect: { ...placedRect, x: -1 } },
+      "[game] config.page.boot.rect.x is -1."
+    ],
+    [
+      "a rect y that is NaN",
+      { frame: placedFrame, rect: { ...placedRect, y: Number.NaN } },
+      "[game] config.page.boot.rect.y is NaN."
+    ],
+    [
+      "a rect past the right edge",
+      { frame: placedFrame, rect: { ...placedRect, x: 425 } },
+      "[game] config.page.boot.rect ends at x 1025, past frame.width 1024."
+    ],
+    [
+      "a rect past the bottom edge",
+      { frame: placedFrame, rect: { ...placedRect, y: 897 } },
+      "[game] config.page.boot.rect ends at y 1537, past frame.height 1536."
+    ],
+    [
+      "an aspect with no frame",
+      { aspect: { min: 0.4, max: 2.6 } },
+      "[game] config.page.boot.aspect is set without a frame."
+    ],
+    [
+      "an orientation with no frame",
+      { orientation: "portrait" },
+      "[game] config.page.boot.orientation is set without a frame."
+    ],
+    [
+      "an aspect that is no object",
+      { frame: placedFrame, rect: placedRect, aspect: "wide" },
+      '[game] config.page.boot.aspect is "wide".'
+    ],
+    [
+      "an aspect min of 0",
+      { frame: placedFrame, rect: placedRect, aspect: { min: 0, max: 2.6 } },
+      "[game] config.page.boot.aspect.min is 0."
+    ],
+    [
+      "an aspect max below min",
+      { frame: placedFrame, rect: placedRect, aspect: { min: 0.4, max: 0.3 } },
+      "[game] config.page.boot.aspect.max is 0.3."
+    ],
+    [
+      "an orientation the CSS cannot place",
+      { frame: placedFrame, rect: placedRect, orientation: "any" },
+      '[game] config.page.boot.orientation is "any".'
+    ],
+    [
+      "a placed picture the native still cannot take",
+      { image: "assets/boot.jpg", frame: placedFrame, rect: placedRect },
+      '[game] config.page.boot.image "assets/boot.jpg" is not a .png or .webp file.'
+    ],
+    [
+      "a frame that is an array",
+      { frame: [], rect: placedRect },
+      "[game] config.page.boot.frame is []."
+    ],
+    [
+      "a frame with no prototype",
+      { frame: Object.create(null) as object, rect: placedRect },
+      "[game] config.page.boot.frame.width is undefined."
+    ],
+    [
+      "an orientation in an array",
+      { frame: placedFrame, rect: placedRect, orientation: ["portrait"] },
+      '[game] config.page.boot.orientation is ["portrait"].'
+    ],
+    [
+      "a rect x in an array",
+      { frame: placedFrame, rect: { ...placedRect, x: ["5"] } },
+      '[game] config.page.boot.rect.x is ["5"].'
+    ],
+    [
+      "a size the CSS would print as 0",
+      { frame: placedFrame, rect: { ...placedRect, width: 0.000_000_4 } },
+      "[game] config.page.boot.rect.width is 4e-7."
+    ],
+    [
+      "an aspect min the CSS would print as 0",
+      { frame: placedFrame, rect: placedRect, aspect: { min: 0.000_000_4, max: 2.6 } },
+      "[game] config.page.boot.aspect.min is 4e-7."
+    ]
+  ])("refuses %s, naming the field", (_name, part, first) => {
+    const boot = { image: "assets/boot.webp", ...part } as NonNullable<GameConfig["page"]["boot"]>;
+
+    expect(firstLineOf(() => resolveConfig({ page: { title: "T", boot } }))).toBe(first);
+  });
+
+  // Bug: the smallest size the CSS can print is refused, or the fix names a number a person cannot read.
+  it("a size of 0.000001 is taken; a smaller one is told the least it may be", () => {
+    const rect = { ...placedRect, width: 0.000_001 };
+    const boot = { image: "assets/boot.webp", frame: placedFrame, rect };
+
+    expect(resolveConfig({ page: { title: "T", boot } }).page.boot?.place?.rect.width).toBe(
+      0.000_001
+    );
+    expect(() =>
+      resolveConfig({ page: { title: "T", boot: { ...boot, rect: { ...rect, width: 0 } } } })
+    ).toThrow(
+      new Error(
+        "[game] config.page.boot.rect.width is 0.\n  Use a finite number of 0.000001 or more."
+      )
+    );
+  });
+
+  // Bug: the image check refuses a picture the shell takes, or a centred boot that never reaches the shell.
+  it("a placed picture may be .PNG or .webp in any case; a centred one may be any picture", () => {
+    for (const image of ["assets/boot.PNG", "assets/boot.WebP"]) {
+      const boot = { image, frame: placedFrame, rect: placedRect };
+
+      expect(resolveConfig({ page: { title: "T", boot } }).page.boot?.image).toBe(image);
+    }
+
+    expect(resolveConfig({ page: { title: "T", boot: { image: "b.jpg" } } }).page.boot?.image).toBe(
+      "b.jpg"
+    );
+  });
+
+  // Bug: a still that fills its frame to the edge, or starts at its corner, is refused as outside it.
+  it("a rect from the frame's corner to its far edges is inside the frame", () => {
+    const rect = { x: 0, y: 0, ...placedFrame };
+    const boot = { image: "assets/boot.webp", frame: placedFrame, rect };
+
+    expect(resolveConfig({ page: { title: "T", boot } }).page.boot?.place?.rect).toEqual(rect);
   });
 
   // Bug: a half-filled signing block reaches Gradle, which fails after the compile.

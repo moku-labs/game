@@ -50,6 +50,19 @@ function pageWith(page: Partial<ResolvedGameConfig["page"]>): ResolvedGameConfig
 }
 
 /**
+ * The boot rule of a page, from its leading space to the end of the style.
+ *
+ * @param page - The page.
+ * @returns The rule, or `""` when the page has none.
+ */
+function bootRuleOf(page: ResolvedGameConfig["page"]): string {
+  const style = /<style>(.*)<\/style>/.exec(pageHtml(page, devLinks))?.[1] ?? "";
+  const start = style.indexOf(" #moku-boot");
+
+  return start === -1 ? "" : style.slice(start);
+}
+
+/**
  * The relative import specifiers of a module text.
  *
  * @param text - The module.
@@ -184,6 +197,40 @@ describe("pageHtml", () => {
     );
     expect(style).not.toContain("url(");
     expect(pageHtml(plain.page, devLinks)).not.toContain("moku-boot");
+  });
+
+  // Bug: a placed still is centred by its width, transformed, or its frame lines measure the wrong sides.
+  it("pageHtml with a placed boot writes the frame, the cover and the four calc() lines, portrait and landscape", () => {
+    const settings = resolveConfig({
+      page: {
+        title: "A Memory Missing",
+        boot: {
+          image: "assets/splash/studio.webp",
+          width: "52vmin",
+          frame: { width: 1024, height: 1536 },
+          rect: { x: 215, y: 402, width: 600, height: 640 },
+          aspect: { min: 0.4, max: 2.6 },
+          fadeMs: 0
+        }
+      }
+    });
+    const turned = resolveConfig({
+      page: {
+        title: "T",
+        orientation: "landscape",
+        boot: {
+          image: "assets/splash/studio.webp",
+          frame: { width: 1536, height: 1024 },
+          rect: { x: 402, y: 215, width: 640, height: 600 }
+        }
+      }
+    });
+    expect(bootRuleOf(settings.page)).toBe(
+      " #moku-boot { position: fixed; --moku-fw: min(100vw, calc(100vh / 0.4)); --moku-fh: min(100vh, calc(100vw * 2.6)); --moku-k: max(calc(var(--moku-fw) / 1024), calc(var(--moku-fh) / 1536)); left: calc(50vw + var(--moku-k) * -297); top: calc(50vh + var(--moku-k) * -366); width: calc(var(--moku-k) * 600); height: calc(var(--moku-k) * 640); z-index: 1; pointer-events: none; transition: opacity 0ms linear; }"
+    );
+    expect(bootRuleOf(turned.page)).toBe(
+      " #moku-boot { position: fixed; --moku-fw: min(100vw, calc(100vh * 2.333333)); --moku-fh: min(100vh, calc(100vw / 1.333333)); --moku-k: max(calc(var(--moku-fw) / 1536), calc(var(--moku-fh) / 1024)); left: calc(50vw + var(--moku-k) * -366); top: calc(50vh + var(--moku-k) * -297); width: calc(var(--moku-k) * 640); height: calc(var(--moku-k) * 600); z-index: 1; pointer-events: none; transition: opacity 300ms linear; }"
+    );
   });
 
   // Bug: a boot picture outside the game, or a width that closes the rule, reaches the page.

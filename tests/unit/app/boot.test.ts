@@ -3,9 +3,13 @@
  * `<img id="moku-boot">` element, on fake timers: nothing changes before the first scene, the first
  * render frame with a scene fades the picture once and unsubscribes, and whichever of
  * `transitionend` and the timer fallback comes first removes it, once, leaving no timer behind.
+ * `bootPlacement`, where a placed boot picture stands in a window, and `signalLaunch`, the one call
+ * that tells a native shell the first scene drew.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fadeBoot } from "../../../src/app/boot";
+import { bootPlacement, fadeBoot, signalLaunch } from "../../../src/app/boot";
+import type { ResolvedPageBoot } from "../../../src/app/types";
+import type { Rect } from "../../../src/plugins/renderer/viewport/types";
 
 /** One `addEventListener` call of the fake element. */
 type Listened = { type: string; listener: () => void; options: { once: true } };
@@ -168,5 +172,137 @@ describe("fadeBoot", () => {
     expect(listened).toEqual([]);
     expect(subscribed()).toEqual([]);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+/** The placement of the worked portrait config: the studio still of A Memory Missing. */
+const portrait: NonNullable<ResolvedPageBoot["place"]> = {
+  frame: { width: 1024, height: 1536 },
+  rect: { x: 215, y: 402, width: 600, height: 640 },
+  aspect: { min: 0.4, max: 2.6 },
+  orientation: "portrait"
+};
+
+/** The same placement turned for a landscape game, on the renderer's default aspect. */
+const landscape: NonNullable<ResolvedPageBoot["place"]> = {
+  frame: { width: 1536, height: 1024 },
+  rect: { x: 402, y: 215, width: 640, height: 600 },
+  aspect: { min: 4 / 3, max: 21 / 9 },
+  orientation: "landscape"
+};
+
+/**
+ * Rounds a number to 3 decimals, as the spec writes them.
+ *
+ * @param value - The number.
+ * @returns The rounded number.
+ */
+function round(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+/**
+ * Rounds every side of a placement to 3 decimals.
+ *
+ * @param rect - The placement.
+ * @returns The rounded placement.
+ */
+function rounded(rect: Rect): Rect {
+  return {
+    x: round(rect.x),
+    y: round(rect.y),
+    width: round(rect.width),
+    height: round(rect.height)
+  };
+}
+
+describe("bootPlacement", () => {
+  // Bug: the still stands off the place the game draws it: the cover takes the smaller scale, or
+  // the frame is not the one fitFrame gives.
+  it("a portrait window inside the aspect range: the frame is the window, the rect covers it", () => {
+    expect(rounded(bootPlacement({ width: 384, height: 832 }, portrait))).toEqual({
+      x: 31.125,
+      y: 217.75,
+      width: 325,
+      height: 346.667
+    });
+  });
+
+  // Bug: a window taller than the range places the still on the window, not on the clamped frame.
+  it("a portrait window taller than the range: the frame is clamped to 360 × 840 at y 80", () => {
+    const place = { ...portrait, aspect: { min: 4 / 3, max: 21 / 9 } };
+
+    expect(bootPlacement({ width: 360, height: 1000 }, place)).toEqual({
+      x: 17.578_125,
+      y: 299.843_75,
+      width: 328.125,
+      height: 350
+    });
+  });
+
+  // Bug: a landscape game measures the range on the wrong sides of the window.
+  it("a landscape window: inside the range, and wider than it (frame 840 × 360 at x 80)", () => {
+    expect(rounded(bootPlacement({ width: 832, height: 384 }, landscape))).toEqual({
+      x: 217.75,
+      y: 31.125,
+      width: 346.667,
+      height: 325
+    });
+    expect(bootPlacement({ width: 1000, height: 360 }, landscape)).toEqual({
+      x: 299.843_75,
+      y: 17.578_125,
+      width: 350,
+      height: 328.125
+    });
+  });
+});
+
+describe("signalLaunch", () => {
+  // Bug: the shell drops its still before the first scene drew, and the player sees an empty page.
+  it("calls ready once, in the first frame with a scene, and never again", () => {
+    const { time, subscribed, frame } = fakeTime();
+    const ready = vi.fn();
+    const report = vi.fn();
+
+    signalLaunch(time, scenes, ready, report);
+    frame();
+    frame();
+
+    expect(ready).not.toHaveBeenCalled();
+
+    mounted.scene = "splash";
+    frame();
+
+    expect(ready).toHaveBeenCalledTimes(1);
+    expect(subscribed()).toEqual([]);
+
+    frame();
+
+    expect(ready).toHaveBeenCalledTimes(1);
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  // Bug: a shell bridge that throws breaks the frame loop of the running game.
+  it("a throwing ready goes to report once and does not throw out of the frame", () => {
+    const { time, frame } = fakeTime();
+    const failure = new Error("no bridge");
+    const report = vi.fn();
+
+    signalLaunch(
+      time,
+      scenes,
+      () => {
+        throw failure;
+      },
+      report
+    );
+    mounted.scene = "splash";
+
+    expect(frame).not.toThrow();
+
+    frame();
+
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(failure);
   });
 });

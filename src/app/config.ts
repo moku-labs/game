@@ -3,6 +3,7 @@
  * in a file that skips `satisfies GameConfig`. No IO: the page and the CLI both call it. Not
  * exported from any entry.
  */
+import { DEFAULT_ASPECT } from "../plugins/renderer/viewport/fit";
 import type {
   GameConfig,
   OverlayStart,
@@ -17,6 +18,15 @@ const BOOT_WIDTH = "40vmin";
 
 /** The fade of a boot picture whose config names none, ms. */
 const BOOT_FADE_MS = 300;
+
+/**
+ * The smallest size and `aspect.min` of a placed boot: the page writes numbers with 6 decimals, so
+ * anything smaller prints as 0 and the CSS divides by zero.
+ */
+const BOOT_MIN_SIZE = 0.000_001;
+
+/** The pictures a placed boot may name: the native launch still takes only PNG and WebP. */
+const PLACED_IMAGE = /\.(?:png|webp)$/i;
 
 /** The strings a `native.signing.android` cannot go without. */
 const ANDROID_SIGNING_FIELDS = ["keystorePath", "keystorePasswordEnv", "keyAlias"] as const;
@@ -226,12 +236,191 @@ function checkTestApp(native: GameConfig["native"]): void {
 }
 
 /**
+ * Writes a config value the way an error message names it: a string quoted, anything else as is.
+ *
+ * @param value - The value, unchecked.
+ * @returns The text.
+ * @example
+ * ```ts
+ * shown("wide"); // '"wide"'
+ * ```
+ */
+function shown(value: unknown): string {
+  const isPlain = typeof value === "number" || typeof value === "boolean" || value === undefined;
+
+  if (isPlain) return String(value);
+
+  // A string, an array or an object as JSON; what JSON cannot write (a function, a bigint) by its tag.
+  try {
+    const text: string | undefined = JSON.stringify(value);
+
+    return text ?? Object.prototype.toString.call(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
+/**
+ * Throws for a block of `page.boot` that is not an object, and returns it.
+ *
+ * @param field - The field under `page.boot`, such as `frame`.
+ * @param value - The block, unchecked.
+ * @param fields - The fields it holds, for the message, such as `{ width, height }`.
+ * @returns The block.
+ * @throws {Error} When the block is not an object, or is an array.
+ */
+function bootBlock(field: string, value: unknown, fields: string): object {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) return value;
+
+  throw new Error(`[game] config.page.boot.${field} is ${shown(value)}.\n  Use ${fields}.`);
+}
+
+/**
+ * Throws for a number of `page.boot` that is not finite or under its least value, and returns it.
+ *
+ * @param block - The block that holds it, such as `page.boot.rect`.
+ * @param path - The path of the block under `page.boot`, such as `rect`.
+ * @param key - The number's key in the block, such as `x`.
+ * @param least - The smallest value it may take: `BOOT_MIN_SIZE` for a size and `aspect.min`, 0 for
+ *   a position.
+ * @returns The number.
+ * @throws {Error} When the number is missing, not finite, or under its least value.
+ */
+function bootNumber(block: object, path: string, key: string, least: number): number {
+  const value: unknown = Reflect.get(block, key);
+
+  if (typeof value === "number" && Number.isFinite(value) && value >= least) return value;
+
+  throw new Error(
+    `[game] config.page.boot.${path}.${key} is ${shown(value)}.\n  Use a finite number of ${String(least)} or more.`
+  );
+}
+
+/**
+ * Throws for a `frame` or a `rect` of `page.boot` that cannot place the picture: one without the
+ * other, a block that is no object or lacks a number, a size under 0.000001 (it would print as 0
+ * in the CSS), a position under 0, or a rect that leaves the frame.
+ *
+ * @param frame - `page.boot.frame`, unchecked.
+ * @param rect - `page.boot.rect`, unchecked.
+ * @throws {Error} Naming the field, its value and the fix.
+ */
+function checkBootRect(frame: unknown, rect: unknown): void {
+  if (rect === undefined) {
+    throw new Error(
+      "[game] config.page.boot has a frame but no rect.\n  Name page.boot.rect, where the picture lies on the frame."
+    );
+  }
+
+  if (frame === undefined) {
+    throw new Error(
+      "[game] config.page.boot has a rect but no frame.\n  Name page.boot.frame, the canvas the rect is given in."
+    );
+  }
+
+  const canvas = bootBlock("frame", frame, "{ width, height }");
+  const frameWidth = bootNumber(canvas, "frame", "width", BOOT_MIN_SIZE);
+  const frameHeight = bootNumber(canvas, "frame", "height", BOOT_MIN_SIZE);
+  const box = bootBlock("rect", rect, "{ x, y, width, height }");
+  const right = bootNumber(box, "rect", "x", 0) + bootNumber(box, "rect", "width", BOOT_MIN_SIZE);
+  const bottom = bootNumber(box, "rect", "y", 0) + bootNumber(box, "rect", "height", BOOT_MIN_SIZE);
+
+  if (right > frameWidth) {
+    throw new Error(
+      `[game] config.page.boot.rect ends at x ${right}, past frame.width ${frameWidth}.\n  Keep the rect inside page.boot.frame.`
+    );
+  }
+
+  if (bottom > frameHeight) {
+    throw new Error(
+      `[game] config.page.boot.rect ends at y ${bottom}, past frame.height ${frameHeight}.\n  Keep the rect inside page.boot.frame.`
+    );
+  }
+}
+
+/**
+ * Throws for an `aspect` or an `orientation` of `page.boot` the page cannot fit a frame with.
+ *
+ * @param aspect - `page.boot.aspect`, unchecked.
+ * @param orientation - `page.boot.orientation`, unchecked.
+ * @throws {Error} When `aspect` is no object, `min` is not a finite number of 0.000001 or more, `max` is not a
+ * finite number of `min` or more, or `orientation` is neither `"portrait"` nor `"landscape"`.
+ */
+function checkBootFit(aspect: unknown, orientation: unknown): void {
+  if (aspect !== undefined) {
+    const range = bootBlock("aspect", aspect, "{ min, max }");
+    const min = bootNumber(range, "aspect", "min", BOOT_MIN_SIZE);
+    const max: unknown = Reflect.get(range, "max");
+
+    if (!(typeof max === "number" && Number.isFinite(max) && max >= min)) {
+      throw new Error(
+        `[game] config.page.boot.aspect.max is ${shown(max)}.\n  Use a finite number of aspect.min (${min}) or more.`
+      );
+    }
+  }
+
+  if (orientation !== undefined && orientation !== "portrait" && orientation !== "landscape") {
+    throw new Error(
+      `[game] config.page.boot.orientation is ${shown(orientation)}.\n  Use "portrait" or "landscape".`
+    );
+  }
+}
+
+/**
+ * The error of a field only a placed boot picture reads, set on a centred one.
+ *
+ * @param field - `aspect` or `orientation`.
+ * @returns The error.
+ * @example
+ * ```ts
+ * unplacedError("aspect").message.split("\n")[0]; // "[game] config.page.boot.aspect is set without a frame."
+ * ```
+ */
+function unplacedError(field: "aspect" | "orientation"): Error {
+  return new Error(
+    `[game] config.page.boot.${field} is set without a frame.\n  Name page.boot.frame and page.boot.rect, or leave ${field} out.`
+  );
+}
+
+/**
+ * Throws for a placement of `page.boot` that the page and the native launch still cannot show.
+ * Without `frame` and `rect`, only `aspect` and `orientation` are refused; `width` is never read
+ * with a `frame`.
+ *
+ * @param boot - `page.boot` of the config.
+ * @throws {Error} When `frame` and `rect` do not come together or cannot place the picture,
+ * `aspect` or `orientation` comes without a frame or is out of range, or a placed `image` is not
+ * a `.png` or `.webp`.
+ */
+function checkBootPlace(boot: NonNullable<GameConfig["page"]["boot"]>): void {
+  const { frame, rect, aspect, orientation } = boot;
+
+  // A centred picture: what only a placement reads is refused, everything else is as before.
+  if (frame === undefined && rect === undefined) {
+    if (aspect !== undefined) throw unplacedError("aspect");
+    if (orientation !== undefined) throw unplacedError("orientation");
+
+    return;
+  }
+
+  checkBootRect(frame, rect);
+  checkBootFit(aspect, orientation);
+
+  if (!PLACED_IMAGE.test(boot.image)) {
+    throw new Error(
+      `[game] config.page.boot.image "${boot.image}" is not a .png or .webp file.\n  The native launch still takes only those: convert the picture.`
+    );
+  }
+}
+
+/**
  * Throws for the first value of a config that TypeScript would have refused.
  *
  * @param config - The default export of `config.ts`.
  * @throws {Error} When `save` is not a save kind, a `system` name is not wired, the title is empty,
  * `debug.overlay` is not a start mode, `page.boot` has no image, `page.boot.fadeMs` is not a finite number of 0
- * or more, `native.signing` is half filled, `native.ios.minimumVersion` is no iOS version, a value of
+ * or more, the placement of `page.boot` (`frame`, `rect`, `aspect`, `orientation`, a placed `image`) cannot
+ * place the picture, `native.signing` is half filled, `native.ios.minimumVersion` is no iOS version, a value of
  * `native.ios.infoPlist` is no plist value, or `native.dev` cannot name a test app.
  */
 function checkConfig(config: GameConfig): void {
@@ -279,26 +468,49 @@ function checkConfig(config: GameConfig): void {
     );
   }
 
+  if (config.page.boot !== undefined) checkBootPlace(config.page.boot);
+
   checkSigning(config.native?.signing);
   checkIos(config.native?.ios);
   checkTestApp(config.native);
 }
 
 /**
- * Fills the defaults of `page.boot`: the width `"40vmin"`, the fade 300 ms.
+ * Fills the defaults of `page.boot`: the width `"40vmin"`, the fade 300 ms. With `frame` and
+ * `rect` it adds `place`: the aspect defaults to the renderer's, the orientation to
+ * `page.orientation` when it is `"portrait"` or `"landscape"`, else `"portrait"`.
  *
- * @param boot - `page.boot` of the config.
+ * @param boot - `page.boot` of the config, checked.
+ * @param orientation - `page.orientation` of the config, or `undefined`.
  * @returns The boot with every field set.
  * @example
  * ```ts
- * resolveBoot({ image: "assets/boot.png", fadeMs: 0 }); // { image: "assets/boot.png", width: "40vmin", fadeMs: 0 }
+ * resolveBoot({ image: "assets/boot.png", fadeMs: 0 }, "any"); // { image: "assets/boot.png", width: "40vmin", fadeMs: 0 }
  * ```
  */
-function resolveBoot(boot: NonNullable<GameConfig["page"]["boot"]>): ResolvedPageBoot {
-  return {
+function resolveBoot(
+  boot: NonNullable<GameConfig["page"]["boot"]>,
+  orientation: GameConfig["page"]["orientation"]
+): ResolvedPageBoot {
+  const resolved = {
     image: boot.image,
     width: boot.width ?? BOOT_WIDTH,
     fadeMs: boot.fadeMs ?? BOOT_FADE_MS
+  };
+  const { frame, rect, aspect = DEFAULT_ASPECT } = boot;
+
+  // A centred picture: no place, the page as before.
+  if (frame === undefined || rect === undefined) return resolved;
+
+  return {
+    ...resolved,
+    // Fresh blocks of the known keys only: nothing else of the config reaches the page or the shell.
+    place: {
+      frame: { width: frame.width, height: frame.height },
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      aspect: { min: aspect.min, max: aspect.max },
+      orientation: boot.orientation ?? (orientation === "landscape" ? "landscape" : "portrait")
+    }
   };
 }
 
@@ -306,13 +518,15 @@ function resolveBoot(boot: NonNullable<GameConfig["page"]["boot"]>): ResolvedPag
  * Fills every default of a game's `config.ts`: `lang` `"en"`, `background` `"#000000"`,
  * `orientation` `"portrait"`, no icons, no head tags, no system plugin, the memory save, no asset
  * layers, the overlay of a debug page closed at its start. A `page.boot` gets the width
- * `"40vmin"` and the fade 300 ms; without one the page has no `boot` key.
+ * `"40vmin"` and the fade 300 ms, and with `frame` and `rect` a `place` (the renderer's aspect and
+ * `page.orientation`, or `"portrait"`, by default); without one the page has no `boot` key.
  *
  * @param config - The default export of `config.ts`.
  * @returns The config with every field set.
  * @throws {Error} When `save` is not a save kind, a `system` name is not wired, the title is empty,
  * `debug.overlay` is not a start mode, `page.boot` has no image, `page.boot.fadeMs` is not a finite number of 0
- * or more, `native.signing` is half filled, `native.ios.minimumVersion` is no iOS version, a value of
+ * or more, the placement of `page.boot` (`frame`, `rect`, `aspect`, `orientation`, a placed `image`) cannot
+ * place the picture, `native.signing` is half filled, `native.ios.minimumVersion` is no iOS version, a value of
  * `native.ios.infoPlist` is no plist value, or `native.dev` cannot name a test app.
  * @example
  * ```ts
@@ -331,7 +545,9 @@ export function resolveConfig(config: GameConfig): ResolvedGameConfig {
       icons: config.page.icons ?? {},
       head: config.page.head ?? [],
       // Written only with a boot: a page without one resolves as it did before page.boot.
-      ...(config.page.boot === undefined ? {} : { boot: resolveBoot(config.page.boot) })
+      ...(config.page.boot === undefined
+        ? {}
+        : { boot: resolveBoot(config.page.boot, config.page.orientation) })
     },
     native: config.native,
     system: config.system ?? [],
