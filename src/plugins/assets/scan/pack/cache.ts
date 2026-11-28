@@ -19,7 +19,7 @@ import { TRIM_MARGIN } from "./trim";
 export const CACHE_FOLDER = path.join("node_modules", ".cache", "moku-game-pack");
 
 /** Changes when the shape of an entry changes, so an old entry is never read as a new one. */
-const FORMAT = "pack-2";
+const FORMAT = "pack-3";
 
 /** The optional fields of a frame that say where a trimmed texture lay in its original. */
 const TRIM_FIELDS = ["offsetX", "offsetY", "origWidth", "origHeight"] as const;

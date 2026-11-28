@@ -16,6 +16,8 @@ import { type Encoder, loadEncoder, type PagePart, type Pixels } from "./encode"
 import { type Group, planGroups } from "./groups";
 import { type Boxed, type LayoutFrame, layoutGroup, type Trim } from "./layout";
 import { contentHash, looseName, pageId, pageName } from "./names";
+import { recordTwin, type Twins, twinNotes } from "./notes";
+import { splitRepeats, withRepeats } from "./repeats";
 import { cropPixels, trimBox } from "./trim";
 
 /**
@@ -48,6 +50,8 @@ export type PackResult = {
   bytes: number;
   /** How many of the pages were replayed from the cache. */
   cacheHits: number;
+  /** One line per group of texture files with the same bytes under different keys. */
+  notes: string[];
 };
 
 /** A texture of the scan, with its source bytes and their SHA-256. */
@@ -70,6 +74,8 @@ type PackRun = {
   outputs: Map<string, Uint8Array>;
   problems: string[];
   cacheHits: number;
+  /** SHA-256 of a texture source to every texture read with those bytes, in reading order. */
+  twins: Twins;
 };
 
 /** The pack folder keeps a file of this name even when the manifest goes elsewhere. */
@@ -333,18 +339,21 @@ async function packGroup(
 
   const open = run.problems.length;
 
-  // Decode every member once and cut its margin.
-  const cuts = await decodeGroup(run, members);
-  const byKey = new Map(cuts.map(cut => [cut.source.key, cut]));
+  // Decode every member once and cut its margin; identical cuts are laid out once.
+  const { first, repeats } = splitRepeats(await decodeGroup(run, members));
+  const byKey = new Map(first.map(cut => [cut.source.key, cut]));
   const images: CachedImage[] = [];
 
   // Lay the cuts out on pages; what the layout refuses is a problem.
-  const layout = layoutGroup(bundle, group, boxedOf(cuts));
+  const layout = layoutGroup(bundle, group, boxedOf(first));
 
   run.problems.push(...layout.problems);
 
-  // Compose and encode each page, and cache the group when nothing went wrong.
-  for (const page of layout.pages) images.push(await encodePage(run, page, byKey));
+  // Compose and encode each page, and cache the group when nothing went wrong. A repeat has a frame
+  // and no cut of its own, so its pixels are drawn once.
+  for (const page of layout.pages) {
+    images.push(await encodePage(run, withRepeats(page, repeats), byKey));
+  }
 
   if (run.problems.length === open) await writeCache(run.cache, key, images);
 
@@ -574,7 +583,8 @@ async function packLoose(
 }
 
 /**
- * Packs one bundle: its atlas groups become pages, the rest is written loose or copied.
+ * Packs one bundle: its atlas groups become pages, the rest is written loose or copied. Every
+ * texture it reads is remembered by its bytes, for the notes of the pack.
  *
  * @param run - The pack run, which collects the files to write.
  * @param name - Name of the bundle.
@@ -586,7 +596,11 @@ async function packBundle(
   name: string,
   bundle: ManifestBundle
 ): Promise<ManifestBundle> {
-  const plan = planGroups(await readTextures(run, bundle));
+  const sources = await readTextures(run, bundle);
+  const plan = planGroups(sources);
+
+  // Remember every texture by the hash of its bytes, for the notes of the same file under two keys.
+  for (const source of sources) recordTwin(run.twins, name, source);
 
   // The atlas groups first, then what stays a file of its own: what the plan kept out of a group.
   const packed = await packGroups(run, name, plan.groups);
@@ -956,7 +970,8 @@ export async function packAssets(options: PackOptions): Promise<PackResult> {
     encoder: await loadEncoder(),
     outputs: emptyMap(),
     problems: [],
-    cacheHits: 0
+    cacheHits: 0,
+    twins: emptyMap()
   };
   const bundles: Record<string, ManifestBundle> = {};
 
@@ -982,6 +997,7 @@ export async function packAssets(options: PackOptions): Promise<PackResult> {
     pages: countPages(all),
     loose: countLoose(all),
     bytes,
-    cacheHits: run.cacheHits
+    cacheHits: run.cacheHits,
+    notes: twinNotes(run.twins)
   };
 }

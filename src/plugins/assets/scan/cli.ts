@@ -650,6 +650,7 @@ async function runPack(
   }
 
   ui.info(packSummary(options.manifest, result, options.cache));
+  for (const note of result.notes) ui.warn(note);
 
   return 0;
 }
