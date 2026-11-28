@@ -228,5 +228,29 @@ export const BUDGET = {
    * overlay mount, never per frame: 64 B, the level patch and the options of the rest of the track. The track
    * that mount starts allocates its own record in anim too; nothing of this runs again in later frames.
    */
-  fadeMount: 64
+  fadeMount: 64,
+  /**
+   * hp-2ab (change 2026-11-27-hp-2ab-style-layout): an element's node taken from the spare and put back, over the
+   * same placement, removal and map writes on a node that stays (`node-spare.fixture.ts`). The spare's own work keeps
+   * nothing: each of its steps added to the control left it unchanged. The line is the drift of V8's map tables
+   * between two windows of the same control: 910 B and 966 B on the Mac.
+   */
+  spareOverPlacement: 64,
+  /**
+   * hp-2ab: what one element's node cost before the spare, over the control: Yoga's node wrapper and its 48-slot kept
+   * record, made and freed. Measured 1 263 B on the Mac; the line holds the floor the spare must save.
+   */
+  spareSaves: 1000,
+  /**
+   * hp-2ab: `resolve` of a defined row style (`resolve.fixture.ts`): 96 B, the resolved object and nothing else. Was
+   * 1 401 B before the change (a rest copy of the style, an entries array per variant, a copy of every padding). The
+   * line keeps 32 B for the drift of two windows.
+   */
+  resolveDefined: 128,
+  /**
+   * hp-2ab: `resolve` of the same style written inline, its build taken out: 424 B, the resolved object, a frozen copy
+   * of the game's padding, and what the fixture's mix of style shapes costs the merge. Was 889 B. The line keeps 32 B
+   * for the drift of two windows.
+   */
+  resolveInline: 456
 } as const;

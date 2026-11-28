@@ -6,7 +6,7 @@ import { flagsOf, noFlags, sameViewport } from "../../styles/flags";
 import { resolve, type StyleFlags } from "../../styles/resolve";
 import { createStylesState } from "../../styles/state";
 import { defineTokens } from "../../styles/tokens";
-import type { TextTagStyle } from "../../styles/types";
+import type { Style, TextTagStyle } from "../../styles/types";
 import type { UiCtx } from "../../types";
 
 /**
@@ -51,6 +51,22 @@ describe("defineStyle and defineTokens", () => {
 
     expect(tokens.space.md).toBe(16);
     expect(Object.isFrozen(tokens)).toBe(true);
+  });
+
+  it("freezes the padding and the margin of the base and of every variant", () => {
+    // Bug caught: the edges of a defined style stay writable, so the resolution, which hands them out as they are,
+    // shares a writable object with every element of the style.
+    const style = defineStyle({
+      padding: { top: 4 },
+      margin: { left: 2 },
+      when: { landscape: { padding: { top: 8 } } },
+      is: { pressed: { margin: { left: 6 } } }
+    });
+
+    expect(Object.isFrozen(style.padding)).toBe(true);
+    expect(Object.isFrozen(style.margin)).toBe(true);
+    expect(Object.isFrozen(style.when?.landscape?.padding)).toBe(true);
+    expect(Object.isFrozen(style.is?.pressed?.margin)).toBe(true);
   });
 });
 
@@ -214,6 +230,36 @@ describe("resolve", () => {
 
     expect(style.gap).toBe(8);
     expect(Object.isFrozen(resolved)).toBe(true);
+  });
+
+  it("answers a frozen copy of the edges a game wrote inline, and the frozen edges of a defined style as they are", () => {
+    // Bug caught: the resolution hands out the game's own padding object, so a write into one element's padding
+    // reaches the next resolve of that object; or copies the frozen edges of a defined style on every resolve.
+    const inline = { top: 4, left: 2 };
+    const resolved = resolve({ padding: inline, margin: 6 }, flags(), viewportOf());
+    const defined = defineStyle({ padding: { top: 4 }, is: { active: { margin: { left: 8 } } } });
+    const active = resolve(defined, flags({ active: true }), viewportOf());
+
+    expect(resolved.padding).toEqual({ top: 4, left: 2 });
+    expect(resolved.padding).not.toBe(inline);
+    expect(Object.isFrozen(resolved.padding)).toBe(true);
+    expect(Object.isFrozen(inline)).toBe(false);
+    expect(resolved.margin).toBe(6);
+    expect(active.padding).toBe(defined.padding);
+    expect(active.margin).toBe(defined.is?.active?.margin);
+  });
+
+  it("drops a field the style holds as undefined, in the base and in a variant", () => {
+    // Bug caught: an `undefined` in a variant overwrites the base value, or a key with `undefined` reaches the layout.
+    const resolved = resolve(
+      // A JS game, or a spread of an optional value, can hand a field over as `undefined`.
+      { gap: 8, width: undefined, is: { active: { gap: undefined } } } as unknown as Style,
+      flags({ active: true }),
+      viewportOf()
+    );
+
+    expect(resolved).toEqual({ gap: 8 });
+    expect(Object.keys(resolved)).toEqual(["gap"]);
   });
 
   it("answers an empty style for an element that wrote none", () => {

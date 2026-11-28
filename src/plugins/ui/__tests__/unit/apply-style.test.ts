@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { Element } from "../../jsx/types";
 import { applyStyleToNode, keepSize, layoutChanged } from "../../layout/apply";
-import { createNode, freeNode } from "../../layout/nodes";
+import { createNode, freeNode, freeSpare, SPARE_LIMIT } from "../../layout/nodes";
 import { createLayoutState } from "../../layout/state";
 import type { LayoutState } from "../../layout/types";
 import { loadYogaModule } from "../../layout/yoga";
@@ -456,6 +456,149 @@ describe("a style write that skips what the node holds", () => {
 
     expect(gettersOf(yoga, again)).toEqual(gettersOf(yoga, reference));
     reference.free();
+  });
+});
+
+describe("the spare nodes: a freed node taken back by the next element (hp-2ab)", () => {
+  it("hands the next element the node the last free put aside, and makes no new one", async () => {
+    // Bug caught: the spare is filled and never read, so every element still pays `Node.create` and a kept record.
+    const { state, yoga } = await loaded();
+    const first = nodeOf(state, 1);
+    let made = 0;
+    const create = yoga.Node.create.bind(yoga.Node);
+
+    let second: ReturnType<typeof nodeOf>;
+
+    yoga.Node.create = (...rest: Parameters<typeof create>) => {
+      made += 1;
+
+      return create(...rest);
+    };
+    try {
+      freeNode(state, { entity: 1 } as Element);
+      second = nodeOf(state, 2);
+    } finally {
+      yoga.Node.create = create;
+    }
+    expect(second).toBe(first);
+    expect(made).toBe(0);
+    expect(state.spare.length).toBe(0);
+    expect(state.nodes).toBe(1);
+  });
+
+  it("leaves every getter of a taken-back node where a fresh node written with the same style leaves it", async () => {
+    // Bug caught: a taken-back node keeps what its last element wrote where the next style writes nothing (a
+    // width, a min or max extent the next style leaves out): the next element lays out at the old element's size.
+    const { state, yoga } = await loaded();
+
+    for (const [index, write] of WRITES.entries()) {
+      const before = WRITES[(index + 7) % WRITES.length] as Write;
+
+      keptWrite(state, nodeOf(state, 1), before);
+      freeNode(state, { entity: 1 } as Element);
+
+      const again = nodeOf(state, 1);
+      const reference = yoga.Node.create();
+
+      keptWrite(state, again, write);
+      referenceWrite(yoga, reference, write);
+      expect({ index, ...gettersOf(yoga, again) }).toEqual({
+        index,
+        ...gettersOf(yoga, reference)
+      });
+      reference.free();
+      freeNode(state, { entity: 1 } as Element);
+    }
+  });
+
+  it("takes back a node with no children and lays it out with its new measure, not the size cached for the old one", async () => {
+    // Bug caught: a freed parent keeps its children in the spare, or a measured node serves the size Yoga cached for
+    // the element that freed it.
+    const { state, yoga } = await loaded();
+    const root = yoga.Node.create();
+
+    // A child keeps its own width only where the root does not stretch it.
+    root.setAlignItems(yoga.ALIGN_FLEX_START);
+
+    const parent = nodeOf(state, 1);
+    const child = nodeOf(state, 2);
+
+    // The parent goes while it still holds its child, as a window closes with its rows.
+    parent.insertChild(child, 0);
+    freeNode(state, { entity: 1 } as Element);
+    expect(state.spare.length).toBe(1);
+
+    const reused = nodeOf(state, 3);
+
+    expect(reused).toBe(parent);
+    expect(reused.getChildCount()).toBe(0);
+    expect(child.getParent()).toBeNull();
+
+    reused.setMeasureFunc(() => ({ width: 50, height: 10 }));
+    state.measuring.set(reused, { entity: 3 } as Element);
+    root.insertChild(reused, 0);
+    root.calculateLayout(1000, 1000, yoga.DIRECTION_LTR);
+    expect(reused.getComputedWidth()).toBe(50);
+    // eslint-disable-next-line unicorn/prefer-dom-node-remove -- a Yoga node is not a DOM node.
+    root.removeChild(reused);
+    freeNode(state, { entity: 3 } as Element);
+
+    const measured = nodeOf(state, 4);
+
+    expect(measured).toBe(reused);
+    measured.setMeasureFunc(() => ({ width: 200, height: 10 }));
+    root.insertChild(measured, 0);
+    root.calculateLayout(1000, 1000, yoga.DIRECTION_LTR);
+    expect(measured.getComputedWidth()).toBe(200);
+    root.free();
+  });
+
+  it("measures again a node taken back that measured as a root, at the same size offered", async () => {
+    // Bug caught: a measured node with no parent keeps the size Yoga cached for it (only a removal from a parent
+    // drops that cache), so the next text laid out as a root at the same size gets the old text's width.
+    const { state, yoga } = await loaded();
+    const first = nodeOf(state, 1);
+
+    first.setMeasureFunc(() => ({ width: 50, height: 10 }));
+    state.measuring.set(first, { entity: 1 } as Element);
+    first.calculateLayout(Number.NaN, Number.NaN, yoga.DIRECTION_LTR);
+    expect(first.getComputedWidth()).toBe(50);
+    freeNode(state, { entity: 1 } as Element);
+
+    const again = nodeOf(state, 2);
+
+    expect(again).toBe(first);
+    again.setMeasureFunc(() => ({ width: 200, height: 10 }));
+    again.calculateLayout(Number.NaN, Number.NaN, yoga.DIRECTION_LTR);
+    expect(again.getComputedWidth()).toBe(200);
+  });
+
+  it(`frees a node once ${SPARE_LIMIT} are put aside, and frees the spare when ui stops`, async () => {
+    // Bug caught: the spare grows without end after a window of thousands of rows, or holds nodes of a Yoga module
+    // that a stop let go.
+    const { state } = await loaded();
+
+    for (let entity = 1; entity <= SPARE_LIMIT + 1; entity += 1) nodeOf(state, entity);
+    for (let entity = 1; entity <= SPARE_LIMIT + 1; entity += 1)
+      freeNode(state, { entity } as Element);
+
+    expect(state.spare.length).toBe(SPARE_LIMIT);
+    expect(state.spareKept.length).toBe(SPARE_LIMIT);
+
+    let freed = 0;
+
+    for (const node of state.spare) {
+      const free = node.free.bind(node);
+
+      node.free = () => {
+        freed += 1;
+        free();
+      };
+    }
+    freeSpare(state);
+    expect(freed).toBe(SPARE_LIMIT);
+    expect(state.spare.length).toBe(0);
+    expect(state.spareKept.length).toBe(0);
   });
 });
 

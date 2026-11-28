@@ -79,7 +79,7 @@ function lengthOf(
  * @returns The same shape with numbers only.
  * @example
  * ```ts
- * edgesOf({ top: "safeArea.top" }, { top: 44, right: 0, bottom: 0, left: 0 }); // { top: 44 }
+ * edgesOf({ top: "safeArea.top" }, { top: 44, right: 0, bottom: 0, left: 0 }).top; // 44
  * ```
  */
 function edgesOf(
@@ -89,20 +89,19 @@ function edgesOf(
   if (edges === undefined) return undefined;
   if (typeof edges === "number" || typeof edges === "string") return lengthOf(edges, safeArea);
 
-  const resolved: { top?: number; right?: number; bottom?: number; left?: number } = {};
-
-  for (const edge of ["top", "right", "bottom", "left"] as const) {
-    const value = lengthOf(edges[edge], safeArea);
-
-    if (value !== undefined) resolved[edge] = value;
-  }
-
-  // Frozen with the style that holds it: a kept resolution is shared by every element of one style object.
-  return Object.freeze(resolved);
+  // One literal of one shape, an edge the style left out held as `undefined`, as the layout and its JSON compare read
+  // it. Frozen with the style that holds it: a kept resolution is shared by every element of one style object.
+  return Object.freeze({
+    top: lengthOf(edges.top, safeArea),
+    right: lengthOf(edges.right, safeArea),
+    bottom: lengthOf(edges.bottom, safeArea),
+    left: lengthOf(edges.left, safeArea)
+  }) as ResolvedStyle["padding"];
 }
 
 /**
- * Merges one variant over what is there. Shallow, as the framework merges configs.
+ * Merges one variant over what is there: shallow, as the framework merges configs, a field the variant holds as
+ * `undefined` left out. A for-in over the variant, with no rest copy and no entries array.
  *
  * @param into - The style built so far.
  * @param variant - The variant to lay over it.
@@ -113,40 +112,114 @@ function edgesOf(
 function merge(
   into: Record<string, unknown>,
   variant: BaseStyle | undefined,
-  keepsText = true
+  keepsText: boolean
 ): void {
   if (variant === undefined) return;
 
-  for (const [field, value] of Object.entries(variant)) {
-    if (value !== undefined && (keepsText || field !== "text")) into[field] = value;
+  const source = variant as Record<string, unknown>;
+
+  for (const field in source) {
+    const value = source[field];
+
+    const merged = value !== undefined && (keepsText || field !== "text");
+
+    if (merged) into[field] = value;
   }
+}
+
+/**
+ * Merges the base of a style: every field but its two variant tables.
+ *
+ * @param into - The empty style the merge builds.
+ * @param style - The style a game wrote.
+ */
+function mergeBase(into: Record<string, unknown>, style: Style | TextTagStyle): void {
+  const source = style as Record<string, unknown>;
+
+  for (const field in source) {
+    if (field === "is" || field === "when") continue;
+
+    const value = source[field];
+
+    if (value !== undefined) into[field] = value;
+  }
+}
+
+/**
+ * Lays the `when` variants of the flags that hold over the base, then the `is` variants. While `disabled` holds the
+ * `hover` and `pressed` variants are skipped: a disabled element answers no pointer.
+ *
+ * @param into - The base, merged.
+ * @param style - The style a game wrote.
+ * @param flags - The flags of the frame and of the element.
+ */
+function mergeVariants(
+  into: Record<string, unknown>,
+  style: Style | TextTagStyle,
+  flags: StyleFlags
+): void {
+  const { is, when } = style;
+
+  if (when !== undefined) {
+    for (const name of WHEN_ORDER) {
+      if (flags[name]) merge(into, when[name], true);
+    }
+  }
+
+  if (is === undefined) return;
+
+  for (const name of IS_ORDER) {
+    const pointer = name === "hover" || name === "pressed";
+    const skipped = flags.disabled && pointer;
+
+    if (flags[name] && !skipped) merge(into, is[name], false);
+  }
+}
+
+/**
+ * The padding or margin a resolution hands out. Frozen edges with numbers only, as `defineStyle` leaves them, go as
+ * they are; edges a game wrote inline, or that hold a safe-area token, are copied and frozen, so no element can write
+ * into another element's edges.
+ *
+ * @param edges - What the merged style holds.
+ * @param safeArea - The insets of the viewport.
+ * @returns The edges with numbers only.
+ */
+function resolvedEdges(edges: Edges, safeArea: ViewportSize["safeArea"]): ResolvedStyle["padding"] {
+  if (typeof edges !== "object") return lengthOf(edges, safeArea);
+
+  const sides = edges as Record<string, unknown>;
+  const numbers =
+    typeof sides.top !== "string" &&
+    typeof sides.right !== "string" &&
+    typeof sides.bottom !== "string" &&
+    typeof sides.left !== "string";
+
+  return numbers && Object.isFrozen(edges)
+    ? (edges as ResolvedStyle["padding"])
+    : edgesOf(edges, safeArea);
 }
 
 /**
  * Replaces every safe-area token of a merged style with the number of this viewport.
  *
- * @param merged - The style after the variants were laid over the base.
+ * @param merged - The style after the variants were laid over the base; it holds no `undefined`.
  * @param viewport - What `renderer.viewport.size()` answered.
  * @returns The same object, with numbers where the tokens were.
  */
 function withSafeArea(merged: Record<string, unknown>, viewport: ViewportSize): ResolvedStyle {
-  const resolved = merged as ResolvedStyle & Record<string, unknown>;
+  const safeArea = viewport.safeArea;
 
-  for (const edge of ["padding", "margin"] as const) {
-    const value = edgesOf(merged[edge] as Edges | undefined, viewport.safeArea);
+  if (merged.padding !== undefined)
+    merged.padding = resolvedEdges(merged.padding as Edges, safeArea);
+  if (merged.margin !== undefined) merged.margin = resolvedEdges(merged.margin as Edges, safeArea);
+  if (typeof merged.left === "string") merged.left = lengthOf(merged.left as Length, safeArea);
+  if (typeof merged.top === "string") merged.top = lengthOf(merged.top as Length, safeArea);
+  if (typeof merged.right === "string") merged.right = lengthOf(merged.right as Length, safeArea);
+  if (typeof merged.bottom === "string")
+    merged.bottom = lengthOf(merged.bottom as Length, safeArea);
 
-    if (value === undefined) delete resolved[edge];
-    else resolved[edge] = value;
-  }
-
-  for (const edge of ["left", "top", "right", "bottom"] as const) {
-    const value = lengthOf(merged[edge] as Length | undefined, viewport.safeArea);
-
-    if (value === undefined) delete resolved[edge];
-    else resolved[edge] = value;
-  }
-
-  return resolved;
+  return merged as ResolvedStyle;
 }
 
 /**
@@ -177,19 +250,8 @@ export function resolve(
   const merged: Record<string, unknown> = {};
 
   if (style !== undefined) {
-    const { is, when, ...base } = style;
-
-    merge(merged, base);
-
-    for (const name of WHEN_ORDER) if (flags[name]) merge(merged, when?.[name]);
-    for (const name of IS_ORDER) {
-      // A disabled element answers no pointer, so it never shows hover or pressed.
-      const pointer = name === "hover" || name === "pressed";
-
-      if (!flags[name] || (flags.disabled && pointer)) continue;
-
-      merge(merged, is?.[name], false);
-    }
+    mergeBase(merged, style);
+    mergeVariants(merged, style, flags);
   }
 
   return Object.freeze(withSafeArea(merged, viewport));

@@ -166,6 +166,10 @@ export type LayoutState = {
   parents: Map<YogaNode, YogaNode>;
   /** The element whose measure function each node holds; a node that measures nothing is not in it. */
   measuring: Map<YogaNode, Element>;
+  /** Freed nodes put aside for the next elements, out of every parent, with no children and no measure (hp-2ab). */
+  spare: YogaNode[];
+  /** The kept record of each node of `spare`, at the same index. */
+  spareKept: KeptStyle[];
   /** The patches a live element's write is handed, per component name, written in place (`keptLivePatch`). */
   livePatches: Map<string, KeptFields>;
   /** The rest values a recorded rest is handed, per component name, written in place (`keptRestValue`). */

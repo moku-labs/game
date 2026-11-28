@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createJsxState } from "../../jsx/state";
+import type { Element } from "../../jsx/types";
+import { createNode, freeNode } from "../../layout/nodes";
 import { createLayoutState } from "../../layout/state";
+import { loadYogaModule } from "../../layout/yoga";
+import { stopUi } from "../../lifecycle";
 import { createUiState } from "../../state";
 import { createStylesState } from "../../styles/state";
 import type { Config } from "../../types";
@@ -79,5 +83,25 @@ describe("the module state factories", () => {
     expect(state.byEntity.size).toBe(0);
     expect(state.solves).toBe(0);
     expect(state.measured).toBe(0);
+  });
+});
+
+describe("stopUi and the spare nodes (hp-2ab)", () => {
+  it("frees the nodes put aside, so a second start takes none made by the Yoga of the first", async () => {
+    // Bug caught: the stop frees the live nodes and forgets the spare, so its nodes leak and a second start, with a
+    // new Yoga module, hands one of the old module's nodes to an element.
+    const state = createUiState({ config });
+
+    state.layout.yoga = await loadYogaModule();
+    createNode(state.layout, { entity: 1 } as Element);
+    createNode(state.layout, { entity: 2 } as Element);
+    freeNode(state.layout, { entity: 2 } as Element);
+    expect(state.layout.spare.length).toBe(1);
+
+    stopUi(state);
+
+    expect(state.layout.spare.length).toBe(0);
+    expect(state.layout.spareKept.length).toBe(0);
+    expect(state.layout.byEntity.size).toBe(0);
   });
 });

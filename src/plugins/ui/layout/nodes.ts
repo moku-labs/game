@@ -6,7 +6,7 @@ import type { Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { Element } from "../jsx/types";
 import { ANCHOR } from "../visual";
 import { freshKept, styleTablesOf } from "./apply";
-import type { LayoutState, StyleTables } from "./types";
+import type { KeptStyle, LayoutState, StyleTables } from "./types";
 
 /**
  * The style tables of the loaded module, built the first time a node of it is made.
@@ -28,7 +28,19 @@ function tablesOf(state: LayoutState, yoga: Yoga): StyleTables {
 }
 
 /**
- * Creates the node of an element and counts it, with the kept record of a fresh node.
+ * The most freed nodes kept aside for the next elements. A window of a few hundred elements closes into a spare of as
+ * many; a list of thousands frees the rest. Yoga's memory never shrinks, so a spare node holds no more than the
+ * window that freed it held.
+ */
+export const SPARE_LIMIT = 4096;
+
+/** The slots of the six extents in a kept record (width, height, min, max), kind then number. */
+const FIRST_EXTENT = 28;
+const LAST_EXTENT = 38;
+
+/**
+ * Creates the node of an element and counts it: a node a free put aside, with the kept record of what it holds, or a
+ * new one with the kept record of a fresh node.
  *
  * @param state - The layout state.
  * @param element - The element that entered.
@@ -41,6 +53,18 @@ export function createNode(state: LayoutState, element: Element): YogaNode | und
 
   if (existing !== undefined) return existing;
 
+  const spare = state.spare.pop();
+  const spareKept = state.spareKept.pop();
+
+  if (spare !== undefined && spareKept !== undefined) {
+    unsetExtents(spare, spareKept);
+    state.byEntity.set(element.entity, spare);
+    state.kept.set(spare, spareKept);
+    state.nodes += 1;
+
+    return spare;
+  }
+
   const node = state.yoga.Node.create();
 
   state.byEntity.set(element.entity, node);
@@ -48,6 +72,70 @@ export function createNode(state: LayoutState, element: Element): YogaNode | und
   state.nodes += 1;
 
   return node;
+}
+
+/**
+ * Sets the extents a node taken back still holds to what a node Yoga just made holds: a width and a height of `auto`,
+ * the four min and max unset. A style that leaves an extent out writes nothing, so the width of the element that freed
+ * the node would stay. The kept record goes back to the fresh one's: a point of `NaN`.
+ *
+ * @param node - The node taken back.
+ * @param kept - Its kept record.
+ */
+function unsetExtents(node: YogaNode, kept: KeptStyle): void {
+  for (let slot = FIRST_EXTENT; slot <= LAST_EXTENT; slot += 2) {
+    if (kept[slot] === 0 && Number.isNaN(kept[slot + 1])) continue;
+
+    kept[slot] = 0;
+    kept[slot + 1] = Number.NaN;
+    unsetExtent(node, slot);
+  }
+}
+
+/**
+ * Sets one extent of a node to what a fresh node holds.
+ *
+ * @param node - The node.
+ * @param slot - The extent's first slot in a kept record.
+ */
+function unsetExtent(node: YogaNode, slot: number): void {
+  switch (slot) {
+    case FIRST_EXTENT: {
+      node.setWidthAuto();
+      break;
+    }
+    case FIRST_EXTENT + 2: {
+      node.setHeightAuto();
+      break;
+    }
+    case FIRST_EXTENT + 4: {
+      node.setMinWidth(Number.NaN);
+      break;
+    }
+    case FIRST_EXTENT + 6: {
+      node.setMinHeight(Number.NaN);
+      break;
+    }
+    case FIRST_EXTENT + 8: {
+      node.setMaxWidth(Number.NaN);
+      break;
+    }
+    default: {
+      node.setMaxHeight(Number.NaN);
+    }
+  }
+}
+
+/**
+ * Frees every node the spare holds, as `ui` stops: the next start loads Yoga again.
+ *
+ * @param state - The layout state.
+ */
+export function freeSpare(state: LayoutState): void {
+  for (const node of state.spare) node.free();
+
+  state.spare.length = 0;
+  state.spareKept.length = 0;
 }
 
 /**
@@ -96,7 +184,8 @@ function unplace(state: LayoutState, parent: YogaNode, child: YogaNode): void {
 }
 
 /**
- * Frees the node of an element, after it left its parent: `free()` on an attached node throws.
+ * Frees the node of an element, after it left its parent: `free()` on an attached node throws. The node is put aside
+ * for the next element while the spare holds fewer than `SPARE_LIMIT`.
  *
  * @param state - The layout state.
  * @param element - The element that despawns.
@@ -106,15 +195,49 @@ export function freeNode(state: LayoutState, element: Element): void {
 
   if (node === undefined) return;
 
+  // Out of the parent first, then see whether the node is put aside.
   detachNode(state, element);
-  // eslint-disable-next-line unicorn/no-null -- Yoga clears a measure function with null.
-  node.setMeasureFunc(null);
-  state.measuring.delete(node);
+
+  const kept = state.kept.get(node);
+  const aside = kept !== undefined && state.spare.length < SPARE_LIMIT;
+
+  // A measured node is marked dirty while it still has its function (Yoga refuses it on any other node): the size
+  // Yoga cached for this element is not served to the next one.
+  const measured = state.measuring.delete(node);
+
+  if (aside && measured) node.markDirty();
+
+  // Only a node in `measuring` holds a function; `unsetMeasureFunc` is what `setMeasureFunc(null)` calls, without the
+  // argument copies of the wrapper (56 B a call), as `measure` clears one.
+  if (measured) node.unsetMeasureFunc();
+
+  // Put aside for the next element, or freed for good.
   forgetPlaced(state, node);
-  node.free();
+
+  if (aside) {
+    removeChildren(node);
+    state.spare.push(node);
+    state.spareKept.push(kept);
+  } else {
+    node.free();
+  }
+
+  // The element no longer owns a node.
   state.kept.delete(node);
   state.byEntity.delete(element.entity);
   state.nodes -= 1;
+}
+
+/**
+ * Takes every child out of a node put aside: the next element gets it empty.
+ *
+ * @param node - The node.
+ */
+function removeChildren(node: YogaNode): void {
+  for (let index = node.getChildCount() - 1; index >= 0; index -= 1) {
+    // eslint-disable-next-line unicorn/prefer-dom-node-remove -- a Yoga node is not a DOM node.
+    node.removeChild(node.getChild(index));
+  }
 }
 
 /**
